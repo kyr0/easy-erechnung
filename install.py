@@ -17,7 +17,7 @@ def setup_paddleocr():
     except ImportError:
         print("PaddleOCR not found. Installing...")
         install_package("pymupdf")
-        install_package("paddleocr")
+        install_package("paddleocr[doc-parser]")
         install_package("paddlepaddle")  # Ensure PaddlePaddle backend is installed
         print("PaddleOCR installation complete.")
 

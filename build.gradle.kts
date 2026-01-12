@@ -1,9 +1,14 @@
 plugins {
     id("java")
+    id("application")
 }
 
 group = "de.aronhomberg"
 version = "1.0-SNAPSHOT"
+
+application {
+    mainClass = "de.aronhomberg.Main"
+}
 
 repositories {
     mavenCentral()
@@ -14,6 +19,7 @@ repositories {
 
 dependencies {
     implementation("com.formdev:flatlaf:3.5.4")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("e-iceblue:spire.pdf.free:9.13.0")
     implementation("org.mustangproject:validator:2.15.0:shaded")
     implementation("org.verapdf:verapdf-pdfbox-validation:1.26.2")

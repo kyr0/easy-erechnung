@@ -1,12 +1,9 @@
 package de.aronhomberg;
 
 import com.formdev.flatlaf.FlatLightLaf;
-import com.openai.models.*;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
-import com.openai.client.OpenAIClient;
-import com.openai.client.okhttp.OpenAIOkHttpClient;
 import org.jdesktop.swingx.JXTable;
 import org.jdesktop.swingx.JXDatePicker;
 
@@ -38,87 +35,98 @@ import java.util.*;
 import java.util.List;
 import java.util.function.Function;
 import java.util.prefs.Preferences;
+import java.util.concurrent.TimeUnit;
+
+import okhttp3.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 
 public class Main {
     private static final Preferences prefs = Preferences.userNodeForPackage(Main.class);
 
     private static final String EXTRACTION_PROMPT = """
-You are an expert OCR data analyst and accountant. Given the following information (PPOCR JSON), construct a JSON that optimally has all fields to describe a ZUGFeRD invoice.\s
-The OCRed document is an invoice that is to be sent to a company whom I worked for.\s
-Return only JSON (to be parsed as JSON directly, without any Markdown formatting).\s
-The response data format MUST match. Do not add or remove any fields.\s
-Additional rules:\s
-- Analyze the type of unit per invoice position. It can be either: HUR, DAY or PCE\s
-  - HUR: per hour, DAY: per day (often referred to as PT, MT), PCE: per unit\s
+            You are an expert OCR data analyst and accountant. Given the following information (PPOCR JSON and Markdown), construct a JSON that optimally has all fields to describe a ZUGFeRD invoice.\s
+            The OCRed document is an invoice that is to be sent to a company whom I worked for.\s
+            Return only JSON (to be parsed as JSON directly, without any Markdown formatting).\s
+            The response data format MUST match. Do not add or remove any fields.\s
+            Additional rules:\s
+            - Analyze the type of unit per invoice position. It can be either: HUR, DAY or PCE\s
+              - HUR: per hour, DAY: per day (often referred to as PT, MT), PCE: per unit\s
 
-Seller address:\s
-${SELLER_ADDRESS}
+            Seller address:\s
+            ${SELLER_ADDRESS}
 
-Seller Steuernummer: ${SELLER_TAX_NO}
+            Seller Steuernummer: ${SELLER_TAX_NO}
 
-PPOCR result:
-${PPOCR_RESULT}
+            PPOCRed JSON data:
+            ${PPOCR_RESULT}
 
-JSON response format (MUST match!):\s
-{
-  "Invoice": {
-    "InvoiceNumber": "INV-20250108-001",
-    "InvoiceDate": "2025-01-08",
-    "DueDate": "2025-01-22",
-    "Seller": {
-      "Name": "Example Seller GmbH",
-      "StreetName": "Musterstraße 1",
-      "City": "Musterstadt",
-      "PostalCode": "12345",
-      "CountryCode": "DE",
-      "TaxIdentificationNumber": "DE123456789"
-    },
-    "Buyer": {
-      "Name": "Example Buyer GmbH",
-      "StreetName": "Käuferstraße 2",
-      "City": "Käuferstadt",
-      "PostalCode": "54321",
-      "CountryCode": "DE",
-      "TaxIdentificationNumber": "DE987654321"
-    },
-    "DocumentCurrencyCode": "EUR",
-    "PaymentMeans": {
-      "Type": "42",
-      "PaymentInformation": {
-        "PaymentReceiver": "Max Mustermann",
-        "IBAN": "DE89370400440532013000",
-        "BIC": "COBADEFFXXX",
-        "BankName: "Sparkasse Freising",
-        "PaymentReference": "INV-20250108-001"
-      }
-    },
-    "Tax": {
-      "TaxTypeCode": "VAT",
-      "TaxCategoryCode": "S",
-      "TaxPercentage": 19.00,
-      "TaxAmount": 9.50
-    },
-    "MonetarySummation": {
-      "LineTotal": 50.00,
-      "TaxExclusiveAmount": 50.00,
-      "TaxInclusiveAmount": 59.50,
-      "PayableAmount": 59.50
-    },
-    "InvoiceLines": [
-      {
-        "LineID": "1",
-        "ProductName": "Example Product",
-        "Unit": "PCE",
-        "Quantity": 1.0,
-        "UnitPrice": 50.00,
-        "LineTotalAmount": 50.00,
-        "TaxCategoryCode": "S",
-        "TaxPercentage": 19.00
-      }
-    ]
-  }
-}
-    """;
+            OCRed Markdown data:
+            ${MD_RESULT}
+
+            JSON response format (MUST match!, MUST NOT include Markdown formatting. This will be parsed!):\s
+            {
+              "Invoice": {
+                "InvoiceNumber": "INV-20250108-001",
+                "InvoiceDate": "2025-01-08",
+                "DueDate": "2025-01-22",
+                "Seller": {
+                  "Name": "Example Seller GmbH",
+                  "StreetName": "Musterstraße 1",
+                  "City": "Musterstadt",
+                  "PostalCode": "12345",
+                  "CountryCode": "DE",
+                  "TaxIdentificationNumber": "DE123456789"
+                },
+                "Buyer": {
+                  "Name": "Example Buyer GmbH",
+                  "StreetName": "Käuferstraße 2",
+                  "City": "Käuferstadt",
+                  "PostalCode": "54321",
+                  "CountryCode": "DE",
+                  "TaxIdentificationNumber": "DE987654321"
+                },
+                "DocumentCurrencyCode": "EUR",
+                "PaymentMeans": {
+                  "Type": "42",
+                  "PaymentInformation": {
+                    "PaymentReceiver": "Max Mustermann",
+                    "IBAN": "DE89370400440532013000",
+                    "BIC": "COBADEFFXXX",
+                    "BankName: "Sparkasse Freising",
+                    "PaymentReference": "INV-20250108-001"
+                  }
+                },
+                "Tax": {
+                  "TaxTypeCode": "VAT",
+                  "TaxCategoryCode": "S",
+                  "TaxPercentage": 19.00,
+                  "TaxAmount": 9.50
+                },
+                "MonetarySummation": {
+                  "LineTotal": 50.00,
+                  "TaxExclusiveAmount": 50.00,
+                  "TaxInclusiveAmount": 59.50,
+                  "PayableAmount": 59.50
+                },
+                "InvoiceLines": [
+                  {
+                    "LineID": "1",
+                    "ProductName": "Example Product",
+                    "Unit": "PCE",
+                    "Quantity": 1.0,
+                    "UnitPrice": 50.00,
+                    "LineTotalAmount": 50.00,
+                    "TaxCategoryCode": "S",
+                    "TaxPercentage": 19.00
+                  }
+                ]
+              }
+            }
+                """;
 
     private static final String TITLE = "e@sy e-Rechnung by Aron Homberg";
     private static final String DRAG_DROP_LABEL = "PDF-Rechnung hier ablegen";
@@ -137,8 +145,7 @@ JSON response format (MUST match!):\s
     private static final Map<String, String> UNIT_TRANSLATIONS = Map.of(
             "PCE", "Stück (PCE)",
             "HUR", "Stunden (HUR)",
-            "DAY", "Tage (DAY)"
-    );
+            "DAY", "Tage (DAY)");
 
     private static final Map<String, String> TAX_TRANSLATIONS = Map.of(
             "S", "19% (Normal, S)",
@@ -146,8 +153,7 @@ JSON response format (MUST match!):\s
             "E", "Befreit (E)",
             "AE", "Steuerumkehr (AE)",
             "K", "Innergemeinschaftliche Lieferung (K)",
-            "G", "0% (Nullsteuersatz, G)"
-    );
+            "G", "0% (Nullsteuersatz, G)");
 
     public static void main(String[] args) {
         // Set Look and Feel
@@ -170,7 +176,7 @@ JSON response format (MUST match!):\s
         JSplitPane splitPane = new JSplitPane(
                 JSplitPane.HORIZONTAL_SPLIT,
                 dragDropPanel, // Left side
-                tabbedPane     // Right side
+                tabbedPane // Right side
         );
         splitPane.setDividerLocation(1024); // Initial divider position
 
@@ -259,10 +265,10 @@ JSON response format (MUST match!):\s
 
     private static JPanel createRahmendatenTab() {
         // Initialize Sender and Recipient fields
-        initializeFieldMap(senderFieldsMap, new String[]{
+        initializeFieldMap(senderFieldsMap, new String[] {
                 "Name", "Adresse", "PLZ", "Ort", "Land", "Steuernummer/Ust-ID"
         });
-        initializeFieldMap(recipientFieldsMap, new String[]{
+        initializeFieldMap(recipientFieldsMap, new String[] {
                 "Name", "Adresse", "PLZ", "Ort", "Land", "Steuernummer/Ust-ID"
         });
 
@@ -287,22 +293,20 @@ JSON response format (MUST match!):\s
         JPanel senderPanel = createGroupPanel(
                 "Rechnung von:",
                 senderFieldsMap,
-                List.of("Name", "Adresse", "PLZ", "Ort", "Land", "Steuernummer/Ust-ID")
-        );
+                List.of("Name", "Adresse", "PLZ", "Ort", "Land", "Steuernummer/Ust-ID"));
 
         // Create Recipient Panel
         JPanel recipientPanel = createGroupPanel(
                 "Rechnung an:",
                 recipientFieldsMap,
-                List.of("Name", "Adresse", "PLZ", "Ort", "Land", "Steuernummer/Ust-ID")
-        );
+                List.of("Name", "Adresse", "PLZ", "Ort", "Land", "Steuernummer/Ust-ID"));
 
         // Create Invoice Details Panel
         JPanel invoiceDetailsPanel = createGroupPanel(
                 "Rechnungsdetails:",
                 invoiceDetailsMap,
-                List.of("Zahlungsziel", "Rechnungsnummer", "Rechnungsdatum", "IBAN", "BIC", "Bank Name", "Zahlungsempfänger", "Zahlungsreferenz")
-        );
+                List.of("Zahlungsziel", "Rechnungsnummer", "Rechnungsdatum", "IBAN", "BIC", "Bank Name",
+                        "Zahlungsempfänger", "Zahlungsreferenz"));
 
         gbc.gridy = 0;
         gbc.insets = new Insets(5, 10, 5, 10); // Restore default insets
@@ -334,7 +338,7 @@ JSON response format (MUST match!):\s
     private static boolean validateRahmendaten() {
         // Check sender fields
         boolean hasSteuernummer = !senderFieldsMap.get("Steuernummer/Ust-ID").getText().trim().isEmpty();
-        boolean hasUstId = !((JTextField)einstellungenFieldsMap.get("USt-ID")).getText().trim().isEmpty();
+        boolean hasUstId = !((JTextField) einstellungenFieldsMap.get("USt-ID")).getText().trim().isEmpty();
 
         if (!hasSteuernummer && !hasUstId) {
             showError("Entweder Steuernummer oder USt-ID muss angegeben werden.");
@@ -377,9 +381,12 @@ JSON response format (MUST match!):\s
     }
 
     private static boolean validateAll() {
-        if (!validateRahmendaten()) return false;
-        if (!validatePositionen()) return false;
-        if (!validateSummenUndSteuern()) return false;
+        if (!validateRahmendaten())
+            return false;
+        if (!validatePositionen())
+            return false;
+        if (!validateSummenUndSteuern())
+            return false;
         return true;
     }
 
@@ -393,8 +400,7 @@ JSON response format (MUST match!):\s
             ZUGFeRDInvoiceWriter writer = new ZUGFeRDInvoiceWriter(invoice, pdfFilePath);
             String eRechnungFilePath = writer.generateZUGFeRDInvoice();
 
-            ERechnungValidator.ValidationResult validationResult =
-                    ERechnungValidator.doValidate(eRechnungFilePath);
+            ERechnungValidator.ValidationResult validationResult = ERechnungValidator.doValidate(eRechnungFilePath);
 
             StringBuilder messageBuilder = new StringBuilder();
 
@@ -414,10 +420,11 @@ JSON response format (MUST match!):\s
 
             if (!validationResult.notices.isEmpty()) {
                 /*
-                messageBuilder.append("Hinweise:\n");
-                for (String notice : validationResult.notices) {
-                    messageBuilder.append("• ").append(notice).append("\n");
-                }*/
+                 * messageBuilder.append("Hinweise:\n");
+                 * for (String notice : validationResult.notices) {
+                 * messageBuilder.append("• ").append(notice).append("\n");
+                 * }
+                 */
             }
 
             JOptionPane.showMessageDialog(null,
@@ -436,7 +443,8 @@ JSON response format (MUST match!):\s
         }
     }
 
-    private static JPanel createGroupPanel(String title, Map<String, ? extends JComponent> fieldMap, List<String> fieldOrder) {
+    private static JPanel createGroupPanel(String title, Map<String, ? extends JComponent> fieldMap,
+            List<String> fieldOrder) {
         JPanel groupPanel = new JPanel(new GridBagLayout());
         groupPanel.setBorder(BorderFactory.createTitledBorder(title)); // Add titled border
 
@@ -523,8 +531,10 @@ JSON response format (MUST match!):\s
         };
 
         // Add example data (optional)
-        //positionenTableModel.addRow(new Object[]{"1", "Dienstleistung A", 8.00, "HUR", 50.00, 400.00, "S"});
-        //positionenTableModel.addRow(new Object[]{"2", "Beratung", 1.00, "DAY", 800.00, 800.00, "E"});
+        // positionenTableModel.addRow(new Object[]{"1", "Dienstleistung A", 8.00,
+        // "HUR", 50.00, 400.00, "S"});
+        // positionenTableModel.addRow(new Object[]{"2", "Beratung", 1.00, "DAY",
+        // 800.00, 800.00, "E"});
 
         // Create the JXTable
         JXTable table = new JXTable(positionenTableModel);
@@ -538,7 +548,7 @@ JSON response format (MUST match!):\s
         DefaultTableCellRenderer decimalRenderer = new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(JTable table, Object value,
-                                                           boolean isSelected, boolean hasFocus, int row, int column) {
+                    boolean isSelected, boolean hasFocus, int row, int column) {
                 if (value instanceof Number) {
                     value = germanFormat.format(((Number) value).doubleValue());
                 }
@@ -567,7 +577,7 @@ JSON response format (MUST match!):\s
 
             @Override
             public Component getTableCellEditorComponent(JTable table, Object value,
-                                                         boolean isSelected, int row, int column) {
+                    boolean isSelected, int row, int column) {
                 if (value instanceof Number) {
                     value = germanFormat.format(value);
                 }
@@ -576,9 +586,9 @@ JSON response format (MUST match!):\s
         };
 
         // Set preferred widths for columns
-        table.getColumnModel().getColumn(0).setPreferredWidth(50);  // Pos. Nr.
+        table.getColumnModel().getColumn(0).setPreferredWidth(50); // Pos. Nr.
         table.getColumnModel().getColumn(1).setPreferredWidth(300); // Beschreibung
-        table.getColumnModel().getColumn(2).setPreferredWidth(70);  // Menge
+        table.getColumnModel().getColumn(2).setPreferredWidth(70); // Menge
         table.getColumnModel().getColumn(3).setPreferredWidth(100); // Einheit
         table.getColumnModel().getColumn(4).setPreferredWidth(100); // Einzelpreis
         table.getColumnModel().getColumn(5).setPreferredWidth(100); // Gesamtpreis
@@ -637,7 +647,7 @@ JSON response format (MUST match!):\s
 
         // Add button functionality
         addButton.addActionListener(e -> {
-            positionenTableModel.addRow(new Object[]{"", "", 0.00, "HUR", 0.00, 0.00, "S"}); // Standardwerte
+            positionenTableModel.addRow(new Object[] { "", "", 0.00, "HUR", 0.00, 0.00, "S" }); // Standardwerte
         });
 
         removeButton.addActionListener(e -> {
@@ -645,7 +655,8 @@ JSON response format (MUST match!):\s
             if (selectedRow != -1) {
                 positionenTableModel.removeRow(selectedRow);
             } else {
-                JOptionPane.showMessageDialog(positionenTab, "Keine Position ausgewählt.", "Fehler", JOptionPane.WARNING_MESSAGE);
+                JOptionPane.showMessageDialog(positionenTab, "Keine Position ausgewählt.", "Fehler",
+                        JOptionPane.WARNING_MESSAGE);
             }
         });
 
@@ -795,7 +806,6 @@ JSON response format (MUST match!):\s
         return field != null ? field.getText() : null;
     }
 
-
     private static JPanel createEinstellungenTab() {
         // Initialize the fields
         einstellungenFieldsMap.put("OpenAI Key", new JPasswordField(30));
@@ -858,7 +868,8 @@ JSON response format (MUST match!):\s
         prefs.put("OpenAIKey", ((JTextField) einstellungenFieldsMap.get("OpenAI Key")).getText());
         prefs.put("Steuernummer", ((JTextField) einstellungenFieldsMap.get("Steuernummer")).getText());
         prefs.put("UStID", ((JTextField) einstellungenFieldsMap.get("USt-ID")).getText());
-        prefs.put("Adresse", ((JTextArea) ((JScrollPane) einstellungenFieldsMap.get("Adresse")).getViewport().getView()).getText());
+        prefs.put("Adresse",
+                ((JTextArea) ((JScrollPane) einstellungenFieldsMap.get("Adresse")).getViewport().getView()).getText());
         JOptionPane.showMessageDialog(null, "Einstellungen gespeichert.", "Speichern", JOptionPane.INFORMATION_MESSAGE);
     }
 
@@ -866,10 +877,12 @@ JSON response format (MUST match!):\s
         ((JTextField) einstellungenFieldsMap.get("OpenAI Key")).setText(prefs.get("OpenAIKey", ""));
         ((JTextField) einstellungenFieldsMap.get("Steuernummer")).setText(prefs.get("Steuernummer", ""));
         ((JTextField) einstellungenFieldsMap.get("USt-ID")).setText(prefs.get("UStID", ""));
-        ((JTextArea) ((JScrollPane) einstellungenFieldsMap.get("Adresse")).getViewport().getView()).setText(prefs.get("Adresse", ""));
+        ((JTextArea) ((JScrollPane) einstellungenFieldsMap.get("Adresse")).getViewport().getView())
+                .setText(prefs.get("Adresse", ""));
     }
 
-    private static void configureDragAndDrop(JPanel panel, JLabel messageLabel, JFrame frame, JLabel statusBar, JSplitPane splitPane) {
+    private static void configureDragAndDrop(JPanel panel, JLabel messageLabel, JFrame frame, JLabel statusBar,
+            JSplitPane splitPane) {
         new DropTarget(panel, new DropTargetListener() {
             @Override
             public void dragEnter(DropTargetDragEvent dtde) {
@@ -907,13 +920,24 @@ JSON response format (MUST match!):\s
         return new File(parentPath, "_" + baseName + "." + suffix + ".json").getAbsolutePath();
     }
 
-    private static void runOCRScript(String scriptPath, String pdfFilePath, String jsonFilePath) throws IOException, InterruptedException {
+    private static void runOCRScript(String scriptPath, String pdfFilePath, String jsonFilePath)
+            throws IOException, InterruptedException {
         // Build the command
         List<String> command = new ArrayList<>();
-        command.add("python");
-        command.add(escapeShellArgument(scriptPath));
-        command.add(escapeShellArgument(pdfFilePath));
-        command.add(escapeShellArgument(jsonFilePath));
+
+        // Use the python from the local venv
+        String currentPath = System.getProperty("user.dir");
+        String pythonExecutable = currentPath + File.separator + "venv" + File.separator + "bin" + File.separator
+                + "python";
+
+        // Fallback or check if exists? For now assume venv structure is standard.
+        // If venv doesn't exist, one might want to fallback to "python3" or "python",
+        // but strictly the dependencies are in venv.
+
+        command.add(pythonExecutable);
+        command.add(scriptPath);
+        command.add(pdfFilePath);
+        command.add(jsonFilePath);
 
         // Process builder
         ProcessBuilder processBuilder = new ProcessBuilder(command);
@@ -941,15 +965,6 @@ JSON response format (MUST match!):\s
         }
     }
 
-    private static String escapeShellArgument(String argument) {
-        // Escape argument for shell execution
-        if (argument.contains(" ") || argument.contains("\"")) {
-            // Surround with quotes and escape internal quotes
-            return argument.replace("\"", "\\\"");
-        }
-        return argument;
-    }
-
     private static String ocr(File file) {
         // Get the current working directory
         String currentPath = System.getProperty("user.dir");
@@ -967,6 +982,21 @@ JSON response format (MUST match!):\s
         System.out.println("PDF file path: " + pdfFilePath);
         System.out.println("JSON file path: " + jsonFilePath);
 
+        System.out.println("JSON file path: " + jsonFilePath);
+
+        String mdFilePath = jsonFilePath.replace(".json", ".md");
+        File ocrMdFile = new File(mdFilePath);
+
+        System.out.println("DEBUG: Checking for cache at: " + mdFilePath);
+        System.out.println("DEBUG: File exists: " + ocrMdFile.exists());
+        System.out.println("DEBUG: File length: " + ocrMdFile.length());
+        System.out.println("DEBUG: File absolute path: " + ocrMdFile.getAbsolutePath());
+
+        if (ocrMdFile.exists() && ocrMdFile.length() > 0) {
+            System.out.println("OCR cache found (Markdown). Skipping OCR execution.");
+            return jsonFilePath;
+        }
+
         try {
             runOCRScript(ocrScriptPath, pdfFilePath, jsonFilePath);
         } catch (IOException | InterruptedException e) {
@@ -977,12 +1007,25 @@ JSON response format (MUST match!):\s
 
     private static InvoiceResponse.Invoice analyzeWithAI(String jsonFilePath, String pdfFilePath) {
         String ocrJsonResult = FileUtils.readFileAsText(jsonFilePath);
+        String ocrMdResult = "";
+        try {
+            ocrMdResult = FileUtils.readFileAsText(jsonFilePath.replace(".json", ".md"));
+        } catch (Exception e) {
+            System.err.println("Markdown file not found or could not be read: " + e.getMessage());
+        }
+
+        if (ocrJsonResult == null) {
+            System.err.println("OCR JSON result is null. Aborting AI analysis.");
+            return null;
+        }
+
         String sellerTaxNo = prefs.get("Steuernummer", prefs.get("Ust-ID", "-"));
         String sellerCompanyAddress = prefs.get("Adresse", "-");
         String postProcessingPrompt = EXTRACTION_PROMPT
-            .replace("${SELLER_ADDRESS}", sellerCompanyAddress.trim())
-            .replace("${SELLER_TAX_NO}", sellerTaxNo)
-            .replace("${PPOCR_RESULT}", ocrJsonResult.trim());
+                .replace("${SELLER_ADDRESS}", sellerCompanyAddress.trim())
+                .replace("${SELLER_TAX_NO}", sellerTaxNo)
+                .replace("${PPOCR_RESULT}", ocrJsonResult.trim())
+                .replace("${MD_RESULT}", ocrMdResult != null ? ocrMdResult.trim() : "");
 
         System.out.println("Prompt: " + postProcessingPrompt);
 
@@ -1009,51 +1052,93 @@ JSON response format (MUST match!):\s
             }
 
             // Build the OpenAI ChatCompletion request
-            ChatCompletionCreateParams params = ChatCompletionCreateParams.builder()
-                    .messages(List.of(
-                            ChatCompletionMessageParam.ofChatCompletionSystemMessageParam(
-                                    ChatCompletionSystemMessageParam.builder()
-                                            .role(ChatCompletionSystemMessageParam.Role.SYSTEM)
-                                            .content(ChatCompletionSystemMessageParam.Content.ofTextContent(prompt))
-                                            .build()
-                            )
-                    ))
-                    .model(ChatModel.CHATGPT_4O_LATEST)
-                    .temperature(0.001)
-                    .build();
+            String modelRepo = "Qwen/Qwen3-Omni-30B-A3B-Instruct";
+            String apiKey = prefs.get("OpenAIKey", "no-key");
 
             // Initialize OpenAI client
-            OpenAIClient openAIClient = OpenAIOkHttpClient.builder()
-                    .apiKey(prefs.get("OpenAIKey", "no-key"))
+            String baseUrl = System.getenv("MLLM_OAI_ENDPOINT");
+            if (baseUrl == null || baseUrl.isEmpty()) {
+                baseUrl = "http://localhost:8901"; // Default
+            }
+
+            // Auto-append /v1 if missing and likely needed (standard OpenAI behavior)
+            // But we respect exact user input if they know what they are doing, unless it's
+            // just the root domain.
+            if (!baseUrl.endsWith("/v1") && !baseUrl.endsWith("/v1/")) {
+                baseUrl = baseUrl.replaceAll("/$", "") + "/v1";
+            }
+
+            String chatEndpoint = baseUrl + "/chat/completions";
+
+            OkHttpClient client = new OkHttpClient.Builder()
+                    .connectTimeout(600, TimeUnit.SECONDS)
+                    .writeTimeout(600, TimeUnit.SECONDS)
+                    .readTimeout(600, TimeUnit.SECONDS)
                     .build();
 
-            ChatCompletion chatCompletion = openAIClient.chat().completions().create(params);
-            ChatCompletion.Choice choice = chatCompletion.choices().get(0);
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false); // Ignore "prompt_logprobs" etc.
 
-            if (choice != null) {
-                String responseContent = choice.message().content().get();
-                System.out.println("Generated JSON Response:");
-                System.out.println(responseContent);
+            ObjectNode rootNode = mapper.createObjectNode();
+            rootNode.put("model", modelRepo);
+            rootNode.put("temperature", 0.001);
 
-                // Write the response content to the cache file
-                try (BufferedWriter writer = new BufferedWriter(new FileWriter(aiAnalysisFile))) {
-                    writer.write(responseContent);
-                    System.out.println("AI analysis written to: " + aiAnalysisFile);
-                } catch (IOException e) {
-                    System.err.println("Error occurred while writing AI analysis to file.");
-                    e.printStackTrace();
+            ArrayNode messagesNode = rootNode.putArray("messages");
+            ObjectNode systemMessage = messagesNode.addObject();
+            systemMessage.put("role", "system");
+            systemMessage.put("content", prompt);
+
+            String jsonBody = mapper.writeValueAsString(rootNode);
+
+            RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json; charset=utf-8"));
+            Request request = new Request.Builder()
+                    .url(chatEndpoint)
+                    .addHeader("Authorization", "Bearer " + apiKey)
+                    .post(body)
+                    .build();
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    System.err.println("Unexpected code " + response);
+                    System.err.println("Response body: " + response.body().string());
+                    return null;
                 }
 
-                // Parse and return the response
-                invoiceResponse = JsonParser.parseInvoiceResponse(responseContent);
-                if (invoiceResponse != null) {
-                    return invoiceResponse.invoice;
+                String responseBody = response.body().string();
+                JsonNode responseNode = mapper.readTree(responseBody);
+
+                if (responseNode.has("choices") && responseNode.get("choices").isArray()
+                        && responseNode.get("choices").size() > 0) {
+                    JsonNode choice = responseNode.get("choices").get(0);
+                    String responseContent = choice.get("message").get("content").asText();
+
+                    responseContent = responseContent.replace("```json", "");
+                    responseContent = responseContent.replace("```", "");
+
+                    System.out.println("Generated JSON Response:");
+                    System.out.println(responseContent);
+
+                    // Write the response content to the cache file
+                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(aiAnalysisFile))) {
+                        writer.write(responseContent);
+                        System.out.println("AI analysis written to: " + aiAnalysisFile);
+                    } catch (IOException e) {
+                        System.err.println("Error occurred while writing AI analysis to file.");
+                        e.printStackTrace();
+                    }
+
+                    // Parse and return the response
+                    invoiceResponse = JsonParser.parseInvoiceResponse(responseContent);
+                    if (invoiceResponse != null) {
+                        return invoiceResponse.invoice;
+                    } else {
+                        System.err.println("Error occurred parsing the returned AI analysis response.");
+                    }
                 } else {
-                    System.err.println("Error occurred parsing the returned AI analysis response.");
+                    System.err.println("Error: No choices in AI analysis returned.");
                 }
-            } else {
-                System.err.println("Error: No AI analysis returned.");
             }
+
         } catch (Exception e) {
             e.printStackTrace();
             System.err.println("Failed to process with OpenAI.");
@@ -1062,7 +1147,8 @@ JSON response format (MUST match!):\s
     }
 
     private static void populateFormWithInvoiceData(InvoiceResponse.Invoice invoice) {
-        if (invoice == null) return;
+        if (invoice == null)
+            return;
 
         // Fill sender fields
         Map<String, String> senderData = new HashMap<>();
@@ -1072,7 +1158,8 @@ JSON response format (MUST match!):\s
             senderData.put("PLZ", Optional.ofNullable(invoice.Seller.PostalCode).orElse(""));
             senderData.put("Ort", Optional.ofNullable(invoice.Seller.City).orElse(""));
             senderData.put("Land", Optional.ofNullable(invoice.Seller.CountryCode).orElse(""));
-            senderData.put("Steuernummer/Ust-ID", Optional.ofNullable(invoice.Seller.TaxIdentificationNumber).orElse( Optional.ofNullable(invoice.Seller.TaxVATNumber).orElse("")));
+            senderData.put("Steuernummer/Ust-ID", Optional.ofNullable(invoice.Seller.TaxIdentificationNumber)
+                    .orElse(Optional.ofNullable(invoice.Seller.TaxVATNumber).orElse("")));
         }
         setSenderData(senderData);
 
@@ -1084,7 +1171,8 @@ JSON response format (MUST match!):\s
             recipientData.put("PLZ", Optional.ofNullable(invoice.Buyer.PostalCode).orElse(""));
             recipientData.put("Ort", Optional.ofNullable(invoice.Buyer.City).orElse(""));
             recipientData.put("Land", Optional.ofNullable(invoice.Buyer.CountryCode).orElse(""));
-            senderData.put("Steuernummer/Ust-ID", Optional.ofNullable(invoice.Buyer.TaxIdentificationNumber).orElse( Optional.ofNullable(invoice.Buyer.TaxVATNumber).orElse("")));
+            senderData.put("Steuernummer/Ust-ID", Optional.ofNullable(invoice.Buyer.TaxIdentificationNumber)
+                    .orElse(Optional.ofNullable(invoice.Buyer.TaxVATNumber).orElse("")));
         }
         setRecipientData(recipientData);
 
@@ -1277,11 +1365,13 @@ JSON response format (MUST match!):\s
 
         invoice.PaymentMeans = new InvoiceResponse.Invoice.PaymentMeans();
         invoice.PaymentMeans.PaymentInformation = new InvoiceResponse.Invoice.PaymentMeans.PaymentInformation();
-        invoice.PaymentMeans.PaymentInformation.PaymentReceiver = ((JTextField) invoiceDetailsMap.get("Zahlungsempfänger")).getText();
+        invoice.PaymentMeans.PaymentInformation.PaymentReceiver = ((JTextField) invoiceDetailsMap
+                .get("Zahlungsempfänger")).getText();
         invoice.PaymentMeans.PaymentInformation.BankName = ((JTextField) invoiceDetailsMap.get("Bank Name")).getText();
         invoice.PaymentMeans.PaymentInformation.IBAN = ((JTextField) invoiceDetailsMap.get("IBAN")).getText();
         invoice.PaymentMeans.PaymentInformation.BIC = ((JTextField) invoiceDetailsMap.get("BIC")).getText();
-        invoice.PaymentMeans.PaymentInformation.PaymentReference = ((JTextField) invoiceDetailsMap.get("Zahlungsreferenz")).getText();
+        invoice.PaymentMeans.PaymentInformation.PaymentReference = ((JTextField) invoiceDetailsMap
+                .get("Zahlungsreferenz")).getText();
 
         // Collect monetary summation data
         InvoiceResponse.Invoice.MonetarySummation monetarySummation = new InvoiceResponse.Invoice.MonetarySummation();
@@ -1312,17 +1402,14 @@ JSON response format (MUST match!):\s
             Object einzelpreisObj = position.get("Einzelpreis");
             Object gesamtpreisObj = position.get("Gesamtpreis");
 
-            line.Quantity = mengeObj instanceof Number ?
-                    ((Number) mengeObj).doubleValue() :
-                    parseGermanDouble.apply(String.valueOf(mengeObj));
+            line.Quantity = mengeObj instanceof Number ? ((Number) mengeObj).doubleValue()
+                    : parseGermanDouble.apply(String.valueOf(mengeObj));
 
-            line.UnitPrice = einzelpreisObj instanceof Number ?
-                    ((Number) einzelpreisObj).doubleValue() :
-                    parseGermanDouble.apply(String.valueOf(einzelpreisObj));
+            line.UnitPrice = einzelpreisObj instanceof Number ? ((Number) einzelpreisObj).doubleValue()
+                    : parseGermanDouble.apply(String.valueOf(einzelpreisObj));
 
-            line.LineTotalAmount = gesamtpreisObj instanceof Number ?
-                    ((Number) gesamtpreisObj).doubleValue() :
-                    parseGermanDouble.apply(String.valueOf(gesamtpreisObj));
+            line.LineTotalAmount = gesamtpreisObj instanceof Number ? ((Number) gesamtpreisObj).doubleValue()
+                    : parseGermanDouble.apply(String.valueOf(gesamtpreisObj));
 
             line.TaxCategoryCode = String.valueOf(position.get("Steuerklasse"));
             line.Unit = String.valueOf(position.get("Einheit"));
@@ -1429,9 +1516,11 @@ JSON response format (MUST match!):\s
         worker.execute();
     }
 
-    private static void handleFileDrop(DropTargetDropEvent dtde, JLabel messageLabel, JFrame frame, JLabel statusBar, JSplitPane splitPane) {
+    private static void handleFileDrop(DropTargetDropEvent dtde, JLabel messageLabel, JFrame frame, JLabel statusBar,
+            JSplitPane splitPane) {
         try {
-            List<File> droppedFiles = (List<File>) dtde.getTransferable().getTransferData(DataFlavor.javaFileListFlavor);
+            List<File> droppedFiles = (List<File>) dtde.getTransferable()
+                    .getTransferData(DataFlavor.javaFileListFlavor);
             for (File file : droppedFiles) {
                 if (file.getName().toLowerCase().endsWith(".pdf")) {
                     messageLabel.setText(FILE_ACCEPTED_MSG + file.getName());
@@ -1464,12 +1553,13 @@ JSON response format (MUST match!):\s
                     splitPane.setLeftComponent(scrollPane); // Replace the left component
                     splitPane.setDividerLocation(512);
                     splitPane.revalidate(); // Recalculate the layout
-                    splitPane.repaint();    // Redraw the UI
+                    splitPane.repaint(); // Redraw the UI
                 });
             }
         } catch (IOException e) {
             e.printStackTrace();
-            JOptionPane.showMessageDialog(splitPane, "Fehler beim Laden der PDF-Datei: " + e.getMessage(), "Fehler", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(splitPane, "Fehler beim Laden der PDF-Datei: " + e.getMessage(), "Fehler",
+                    JOptionPane.ERROR_MESSAGE);
         }
     }
 }
