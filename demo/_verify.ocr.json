@@ -1,0 +1,692 @@
+[
+    {
+        "res": {
+            "input_path": "temp_ocr_processing_pages/page_001.png",
+            "page_index": null,
+            "page_count": null,
+            "width": 1654,
+            "height": 2339,
+            "model_settings": {
+                "use_doc_preprocessor": false,
+                "use_layout_detection": true,
+                "use_chart_recognition": false,
+                "format_block_content": false,
+                "merge_layout_blocks": true,
+                "markdown_ignore_labels": [
+                    "number",
+                    "footnote",
+                    "header",
+                    "header_image",
+                    "footer",
+                    "footer_image",
+                    "aside_text"
+                ]
+            },
+            "parsing_res_list": [
+                {
+                    "block_label": "header",
+                    "block_content": "2019-06-10",
+                    "block_bbox": [
+                        173,
+                        156,
+                        325,
+                        189
+                    ],
+                    "block_id": 0,
+                    "block_order": null,
+                    "group_id": 0
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "Bei Spiel GmbH • Ecke 12 • 12345 Stadthausen • Germany",
+                    "block_bbox": [
+                        221,
+                        426,
+                        761,
+                        456
+                    ],
+                    "block_id": 1,
+                    "block_order": 1,
+                    "group_id": 1
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "Theodor Est",
+                    "block_bbox": [
+                        192,
+                        467,
+                        416,
+                        511
+                    ],
+                    "block_id": 2,
+                    "block_order": 2,
+                    "group_id": 2
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "Bahnstr. 42",
+                    "block_bbox": [
+                        191,
+                        544,
+                        371,
+                        585
+                    ],
+                    "block_id": 3,
+                    "block_order": 3,
+                    "group_id": 3
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "88802 Spielkreis\nDeutschland / Germany",
+                    "block_bbox": [
+                        189,
+                        618,
+                        553,
+                        699
+                    ],
+                    "block_id": 4,
+                    "block_order": 4,
+                    "group_id": 4
+                },
+                {
+                    "block_label": "image",
+                    "block_content": "",
+                    "block_bbox": [
+                        1250,
+                        130,
+                        1449,
+                        326
+                    ],
+                    "block_id": 5,
+                    "block_order": null,
+                    "group_id": 5
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "Bei Spiel GmbH",
+                    "block_bbox": [
+                        1248,
+                        337,
+                        1444,
+                        371
+                    ],
+                    "block_id": 6,
+                    "block_order": 5,
+                    "group_id": 6
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "Ecke 12",
+                    "block_bbox": [
+                        1248,
+                        381,
+                        1333,
+                        411
+                    ],
+                    "block_id": 7,
+                    "block_order": 6,
+                    "group_id": 7
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "12345 Stadthausen",
+                    "block_bbox": [
+                        1248,
+                        420,
+                        1441,
+                        451
+                    ],
+                    "block_id": 8,
+                    "block_order": 7,
+                    "group_id": 8
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "phone (555) 23 78 -0",
+                    "block_bbox": [
+                        1248,
+                        459,
+                        1452,
+                        492
+                    ],
+                    "block_id": 9,
+                    "block_order": 8,
+                    "group_id": 9
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "HRA 12345",
+                    "block_bbox": [
+                        1248,
+                        499,
+                        1366,
+                        530
+                    ],
+                    "block_id": 10,
+                    "block_order": 9,
+                    "group_id": 10
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "http://localhost/",
+                    "block_bbox": [
+                        1247,
+                        538,
+                        1399,
+                        570
+                    ],
+                    "block_id": 11,
+                    "block_order": 10,
+                    "group_id": 11
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "Ingmar N. Fo",
+                    "block_bbox": [
+                        1247,
+                        578,
+                        1382,
+                        610
+                    ],
+                    "block_id": 12,
+                    "block_order": 11,
+                    "group_id": 12
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "phone (555) 23 78 -23",
+                    "block_bbox": [
+                        1247,
+                        617,
+                        1464,
+                        649
+                    ],
+                    "block_id": 13,
+                    "block_order": 12,
+                    "group_id": 13
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "info@localhost.local",
+                    "block_bbox": [
+                        1247,
+                        656,
+                        1446,
+                        689
+                    ],
+                    "block_id": 14,
+                    "block_order": 13,
+                    "group_id": 14
+                },
+                {
+                    "block_label": "paragraph_title",
+                    "block_content": "Customer:2",
+                    "block_bbox": [
+                        152,
+                        849,
+                        333,
+                        888
+                    ],
+                    "block_id": 15,
+                    "block_order": 14,
+                    "group_id": 15
+                },
+                {
+                    "block_label": "paragraph_title",
+                    "block_content": "Your order AB321",
+                    "block_bbox": [
+                        152,
+                        925,
+                        488,
+                        964
+                    ],
+                    "block_id": 16,
+                    "block_order": 15,
+                    "group_id": 16
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "Invoice # RE-20190610/507 issued at 2019-06-10\nDate of delivery 2019-06-10",
+                    "block_bbox": [
+                        151,
+                        965,
+                        899,
+                        1044
+                    ],
+                    "block_id": 17,
+                    "block_order": 16,
+                    "group_id": 17
+                },
+                {
+                    "block_label": "table",
+                    "block_content": "<table><tr><td>Amount</td><td>Product</td><td>VAT</td><td>Price</td><td>Total</td></tr><tr><td>1.00</td><td>Design (hours): Of a sample invoice</td><td>7%</td><td>160.00 €</td><td>160.00 €</td></tr><tr><td>400.00</td><td>Ballons: various colors, ~2000ml</td><td>19%</td><td>0.79 €</td><td>316.00 €</td></tr><tr><td>800.00</td><td>Hot air „heiße Luft“ (litres):</td><td>19%</td><td>0.025 €</td><td>20.00 €</td></tr></table>",
+                    "block_bbox": [
+                        156,
+                        1073,
+                        1495,
+                        1361
+                    ],
+                    "block_id": 18,
+                    "block_order": null,
+                    "group_id": 18
+                },
+                {
+                    "block_label": "vision_footnote",
+                    "block_content": "Net total: 496.00 €",
+                    "block_bbox": [
+                        153,
+                        1362,
+                        436,
+                        1399
+                    ],
+                    "block_id": 19,
+                    "block_order": null,
+                    "group_id": 19
+                },
+                {
+                    "block_label": "figure_title",
+                    "block_content": "plus VAT",
+                    "block_bbox": [
+                        154,
+                        1435,
+                        291,
+                        1471
+                    ],
+                    "block_id": 20,
+                    "block_order": null,
+                    "group_id": 20
+                },
+                {
+                    "block_label": "table",
+                    "block_content": "<table><tr><td>VAT</td><td>Net amount</td><td>VAT amount</td></tr><tr><td>7%</td><td>160.00 €</td><td>11.20 €</td></tr><tr><td>19%</td><td>336.00 €</td><td>63.84 €</td></tr><tr><td colspan=\"3\">VAT total: 75.04 €</td></tr></table>",
+                    "block_bbox": [
+                        155,
+                        1470,
+                        798,
+                        1650
+                    ],
+                    "block_id": 21,
+                    "block_order": null,
+                    "group_id": 21
+                },
+                {
+                    "block_label": "vision_footnote",
+                    "block_content": "Due payable: 571.04 €",
+                    "block_bbox": [
+                        154,
+                        1654,
+                        498,
+                        1694
+                    ],
+                    "block_id": 22,
+                    "block_order": null,
+                    "group_id": 22
+                },
+                {
+                    "block_label": "text",
+                    "block_content": "Please remit until 2019-07-01.",
+                    "block_bbox": [
+                        151,
+                        1801,
+                        625,
+                        1841
+                    ],
+                    "block_id": 23,
+                    "block_order": 17,
+                    "group_id": 23
+                },
+                {
+                    "block_label": "footer",
+                    "block_content": "VAT-ID: DE136695976\nIBAN DE88200800000970375700\nBIC COBADEFFXXX\nCommerzbank\nAccount holder: Max Mustermann",
+                    "block_bbox": [
+                        1184,
+                        1992,
+                        1513,
+                        2180
+                    ],
+                    "block_id": 24,
+                    "block_order": null,
+                    "group_id": 24
+                },
+                {
+                    "block_label": "number",
+                    "block_content": "Page 1/1",
+                    "block_bbox": [
+                        767,
+                        2136,
+                        883,
+                        2169
+                    ],
+                    "block_id": 25,
+                    "block_order": null,
+                    "group_id": 25
+                }
+            ],
+            "layout_det_res": {
+                "input_path": null,
+                "page_index": null,
+                "boxes": [
+                    {
+                        "cls_id": 12,
+                        "label": "header",
+                        "score": 0.93156898021698,
+                        "coordinate": [
+                            173.2869873046875,
+                            156.7117462158203,
+                            325.0322265625,
+                            189.32460021972656
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.6755906343460083,
+                        "coordinate": [
+                            221.7750244140625,
+                            426.32757568359375,
+                            761.8336181640625,
+                            456.51141357421875
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.873466432094574,
+                        "coordinate": [
+                            192.43588256835938,
+                            467.7993469238281,
+                            416.5840759277344,
+                            511.2315979003906
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.9293116331100464,
+                        "coordinate": [
+                            191.50428771972656,
+                            544.6768798828125,
+                            371.6512451171875,
+                            585.5325927734375
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.5455901622772217,
+                        "coordinate": [
+                            191.08169555664062,
+                            618.3869018554688,
+                            446.5495910644531,
+                            658.7199096679688
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.7498847246170044,
+                        "coordinate": [
+                            189.63131713867188,
+                            618.2318115234375,
+                            553.8172607421875,
+                            699.8797607421875
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.4220203459262848,
+                        "coordinate": [
+                            191.58837890625,
+                            657.998291015625,
+                            553.6162109375,
+                            698.564453125
+                        ]
+                    },
+                    {
+                        "cls_id": 14,
+                        "label": "image",
+                        "score": 0.8755390644073486,
+                        "coordinate": [
+                            1250.325439453125,
+                            130.08004760742188,
+                            1449.61328125,
+                            326.0500183105469
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.6107488870620728,
+                        "coordinate": [
+                            1248.962646484375,
+                            337.9660949707031,
+                            1444.834716796875,
+                            371.3531799316406
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.8227798938751221,
+                        "coordinate": [
+                            1248.7581787109375,
+                            381.236572265625,
+                            1333.4039306640625,
+                            411.2933349609375
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.8678855895996094,
+                        "coordinate": [
+                            1248.927978515625,
+                            420.9970397949219,
+                            1441.266357421875,
+                            451.7500915527344
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.8760119676589966,
+                        "coordinate": [
+                            1248.4931640625,
+                            459.84515380859375,
+                            1452.82568359375,
+                            492.39886474609375
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.8495001792907715,
+                        "coordinate": [
+                            1248.124267578125,
+                            499.71728515625,
+                            1366.089111328125,
+                            530.243408203125
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.8832675218582153,
+                        "coordinate": [
+                            1247.436767578125,
+                            538.3527221679688,
+                            1399.940185546875,
+                            570.3203735351562
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.8643468618392944,
+                        "coordinate": [
+                            1247.883544921875,
+                            578.858642578125,
+                            1382.562744140625,
+                            610.4869384765625
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.8645042181015015,
+                        "coordinate": [
+                            1247.533447265625,
+                            617.699951171875,
+                            1464.930419921875,
+                            649.757568359375
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.8217811584472656,
+                        "coordinate": [
+                            1247.2880859375,
+                            656.7848510742188,
+                            1446.33056640625,
+                            689.5571899414062
+                        ]
+                    },
+                    {
+                        "cls_id": 17,
+                        "label": "paragraph_title",
+                        "score": 0.6970610022544861,
+                        "coordinate": [
+                            152.86575317382812,
+                            849.47802734375,
+                            333.9609069824219,
+                            888.676513671875
+                        ]
+                    },
+                    {
+                        "cls_id": 17,
+                        "label": "paragraph_title",
+                        "score": 0.9426007866859436,
+                        "coordinate": [
+                            152.63931274414062,
+                            925.10498046875,
+                            488.3367614746094,
+                            964.913818359375
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.9027188420295715,
+                        "coordinate": [
+                            151.24014282226562,
+                            965.421875,
+                            899.261962890625,
+                            1044.58740234375
+                        ]
+                    },
+                    {
+                        "cls_id": 21,
+                        "label": "table",
+                        "score": 0.9830034971237183,
+                        "coordinate": [
+                            156.53900146484375,
+                            1073.661865234375,
+                            1495.596435546875,
+                            1361.084716796875
+                        ]
+                    },
+                    {
+                        "cls_id": 24,
+                        "label": "vision_footnote",
+                        "score": 0.8127675652503967,
+                        "coordinate": [
+                            153.9801025390625,
+                            1362.02978515625,
+                            436.552001953125,
+                            1399.02294921875
+                        ]
+                    },
+                    {
+                        "cls_id": 7,
+                        "label": "figure_title",
+                        "score": 0.5215466022491455,
+                        "coordinate": [
+                            154.0123291015625,
+                            1435.8153076171875,
+                            291.34967041015625,
+                            1471.6397705078125
+                        ]
+                    },
+                    {
+                        "cls_id": 21,
+                        "label": "table",
+                        "score": 0.9550570249557495,
+                        "coordinate": [
+                            155.21920776367188,
+                            1470.4482421875,
+                            798.177001953125,
+                            1650.43359375
+                        ]
+                    },
+                    {
+                        "cls_id": 24,
+                        "label": "vision_footnote",
+                        "score": 0.8071513175964355,
+                        "coordinate": [
+                            154.3187255859375,
+                            1654.8299560546875,
+                            498.855712890625,
+                            1694.7523193359375
+                        ]
+                    },
+                    {
+                        "cls_id": 22,
+                        "label": "text",
+                        "score": 0.7099684476852417,
+                        "coordinate": [
+                            151.512939453125,
+                            1801.6031494140625,
+                            625.4019165039062,
+                            1841.8419189453125
+                        ]
+                    },
+                    {
+                        "cls_id": 8,
+                        "label": "footer",
+                        "score": 0.6307032704353333,
+                        "coordinate": [
+                            1186.030029296875,
+                            1991.9730224609375,
+                            1403.952880859375,
+                            2020.4195556640625
+                        ]
+                    },
+                    {
+                        "cls_id": 8,
+                        "label": "footer",
+                        "score": 0.8833950161933899,
+                        "coordinate": [
+                            1184.625244140625,
+                            1992.5859375,
+                            1513.743896484375,
+                            2180.0263671875
+                        ]
+                    },
+                    {
+                        "cls_id": 16,
+                        "label": "number",
+                        "score": 0.9429308772087097,
+                        "coordinate": [
+                            767.4373779296875,
+                            2136.142333984375,
+                            883.9432373046875,
+                            2169.875732421875
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]

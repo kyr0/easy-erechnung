@@ -432,6 +432,14 @@ public class Main {
                     validationResult.isValid ? "Erfolg" : "Validierungsfehler",
                     validationResult.isValid ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.WARNING_MESSAGE);
 
+            if (validationResult.isValid) {
+                try {
+                    java.awt.Desktop.getDesktop().browse(new java.net.URI("https://www.elster.de/eportal/e-rechnung"));
+                } catch (Exception e) {
+                    System.err.println("Failed to open Elster URL: " + e.getMessage());
+                }
+            }
+
         } catch (Exception e) {
             System.err.println(e.getMessage());
             e.printStackTrace();
@@ -808,7 +816,9 @@ public class Main {
 
     private static JPanel createEinstellungenTab() {
         // Initialize the fields
-        einstellungenFieldsMap.put("OpenAI Key", new JPasswordField(30));
+        einstellungenFieldsMap.put("API Key", new JPasswordField(30));
+        einstellungenFieldsMap.put("Basis URL", new JTextField(30));
+        einstellungenFieldsMap.put("Modell", new JTextField(30));
         einstellungenFieldsMap.put("Steuernummer", new JTextField(30));
         einstellungenFieldsMap.put("USt-ID", new JTextField(30));
         JTextArea adresseField = new JTextArea(5, 30);
@@ -865,7 +875,9 @@ public class Main {
     }
 
     private static void saveEinstellungen() {
-        prefs.put("OpenAIKey", ((JTextField) einstellungenFieldsMap.get("OpenAI Key")).getText());
+        prefs.put("ApiKey", ((JTextField) einstellungenFieldsMap.get("API Key")).getText());
+        prefs.put("BaseUrl", ((JTextField) einstellungenFieldsMap.get("Basis URL")).getText());
+        prefs.put("ModelRepo", ((JTextField) einstellungenFieldsMap.get("Modell")).getText());
         prefs.put("Steuernummer", ((JTextField) einstellungenFieldsMap.get("Steuernummer")).getText());
         prefs.put("UStID", ((JTextField) einstellungenFieldsMap.get("USt-ID")).getText());
         prefs.put("Adresse",
@@ -874,7 +886,9 @@ public class Main {
     }
 
     private static void loadEinstellungen() {
-        ((JTextField) einstellungenFieldsMap.get("OpenAI Key")).setText(prefs.get("OpenAIKey", ""));
+        ((JTextField) einstellungenFieldsMap.get("API Key")).setText(prefs.get("ApiKey", prefs.get("OpenAIKey", "")));
+        ((JTextField) einstellungenFieldsMap.get("Basis URL")).setText(prefs.get("BaseUrl", ""));
+        ((JTextField) einstellungenFieldsMap.get("Modell")).setText(prefs.get("ModelRepo", ""));
         ((JTextField) einstellungenFieldsMap.get("Steuernummer")).setText(prefs.get("Steuernummer", ""));
         ((JTextField) einstellungenFieldsMap.get("USt-ID")).setText(prefs.get("UStID", ""));
         ((JTextArea) ((JScrollPane) einstellungenFieldsMap.get("Adresse")).getViewport().getView())
@@ -1052,11 +1066,11 @@ public class Main {
             }
 
             // Build the OpenAI ChatCompletion request
-            String modelRepo = "Qwen/Qwen3-Omni-30B-A3B-Instruct";
-            String apiKey = prefs.get("OpenAIKey", "no-key");
+            String modelRepo = prefs.get("ModelRepo", "Qwen/Qwen3-Omni-30B-A3B-Instruct");
+            String apiKey = prefs.get("ApiKey", prefs.get("OpenAIKey", "no-key"));
 
             // Initialize OpenAI client
-            String baseUrl = System.getenv("MLLM_OAI_ENDPOINT");
+            String baseUrl = prefs.get("BaseUrl", System.getenv("MLLM_OAI_ENDPOINT"));
             if (baseUrl == null || baseUrl.isEmpty()) {
                 baseUrl = "http://localhost:8901"; // Default
             }
@@ -1309,10 +1323,17 @@ public class Main {
         String taxInfo = senderFieldsMap.get("Steuernummer/Ust-ID").getText();
 
         if (taxInfo != null && !taxInfo.isEmpty()) {
-            if (!taxInfo.contains("/")) {
+            if (taxInfo.contains("/")) {
                 seller.TaxIdentificationNumber = taxInfo;
             } else {
-                seller.TaxVATNumber = taxInfo;
+                // Strip country code if present in VAT ID (e.g. DE123 -> 123)
+                // because ZUGFeRD writer prepends the country code automatically.
+                String countryCode = seller.CountryCode != null ? seller.CountryCode.trim() : "";
+                if (!countryCode.isEmpty() && taxInfo.toUpperCase().startsWith(countryCode.toUpperCase())) {
+                    seller.TaxVATNumber = taxInfo.substring(countryCode.length()).trim();
+                } else {
+                    seller.TaxVATNumber = taxInfo;
+                }
             }
         }
         invoice.Seller = seller;
@@ -1327,10 +1348,16 @@ public class Main {
         String taxInfoRecipient = recipientFieldsMap.get("Steuernummer/Ust-ID").getText();
 
         if (taxInfoRecipient != null && !taxInfoRecipient.isEmpty()) {
-            if (!taxInfoRecipient.contains("/")) {
-                seller.TaxIdentificationNumber = taxInfoRecipient;
+            if (taxInfoRecipient.contains("/")) {
+                buyer.TaxIdentificationNumber = taxInfoRecipient;
             } else {
-                seller.TaxVATNumber = taxInfoRecipient;
+                // Strip country code if present in VAT ID
+                String countryCode = buyer.CountryCode != null ? buyer.CountryCode.trim() : "";
+                if (!countryCode.isEmpty() && taxInfoRecipient.toUpperCase().startsWith(countryCode.toUpperCase())) {
+                    buyer.TaxVATNumber = taxInfoRecipient.substring(countryCode.length()).trim();
+                } else {
+                    buyer.TaxVATNumber = taxInfoRecipient;
+                }
             }
         }
         invoice.Buyer = buyer;
