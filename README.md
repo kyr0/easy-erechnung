@@ -93,10 +93,16 @@ Your new e-Invoice is ready.
 # get the default AI model for invoice data assignment
 ollama pull qwen3:30b-a3b
 
+# Create a Python virtual environment
+python -m venv venv
+
 # Activate the Python virtual environment
 source venv/bin/activate
 
-# Install dependencies
+# Install Pip dependencies
+pip install -r requirements.txt
+
+# Install Python dependencies
 python install.py
 
 # Run OCR on a demo invoice
