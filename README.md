@@ -89,6 +89,10 @@ Your new e-Invoice is ready.
 ## 🚀 Setup
 
 ```bash
+
+# get the default AI model for invoice data assignment
+ollama pull qwen3:30b-a3b
+
 # Create a Python virtual environment
 python -m venv venv
 
