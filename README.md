@@ -90,6 +90,9 @@ Your new e-Invoice is ready.
 
 ```bash
 
+# get the OCR model... this will speed up OCR very significantly
+ollama run glm-ocr
+
 # get the default AI model for invoice data assignment
 ollama pull qwen3:30b-a3b
 
