@@ -131,6 +131,11 @@ On macOS with MLX installed, the app prints a hint that PaddleOCR-VL native mode
 
 The `demo/` folder contains sample invoice data for testing and demonstration purposes.
 
+## 🧑‍💻 Calling the OCR pipeline via Shell
+
+```bash
+bun run src/ocr.ts --input demo/verify_multipage.pdf --output /tmp/test_multipage_v2.json --seller-address "Friedrich-Damm-Str. 8, 80999 München" --seller-tax-no "147/214/00001"
+```
 ---
 
 ## 📜 License

@@ -33,6 +33,7 @@ import java.text.ParseException;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.BooleanSupplier;
@@ -960,7 +961,8 @@ public class Main {
      * LLM settings are read from Java preferences (matching the Einstellungen tab).
      */
     private static void runBunOcrPipeline(String pdfFilePath, String outputJsonPath,
-            BooleanSupplier isCancelled, AtomicReference<Process> runningProcess)
+            BooleanSupplier isCancelled, AtomicReference<Process> runningProcess,
+            java.util.function.Consumer<String> lineCallback)
             throws IOException, InterruptedException {
         throwIfCancelled(isCancelled);
 
@@ -1021,6 +1023,7 @@ public class Main {
                         throw new CancellationException("OCR wurde abgebrochen.");
                     }
                     System.out.println(line);
+                    if (lineCallback != null) lineCallback.accept(line);
                 }
             }
 
@@ -1043,7 +1046,8 @@ public class Main {
      * Uses the "ai" suffix so the output can be parsed directly by JsonParser.
      */
     private static String ocrWithBun(File file, BooleanSupplier isCancelled,
-            AtomicReference<Process> runningProcess) {
+            AtomicReference<Process> runningProcess,
+            java.util.function.Consumer<String> lineCallback) {
         throwIfCancelled(isCancelled);
 
         String aiJsonPath = generateJsonFilePath(file.getAbsolutePath(), "ai");
@@ -1055,7 +1059,7 @@ public class Main {
         }
 
         try {
-            runBunOcrPipeline(file.getAbsolutePath(), aiJsonPath, isCancelled, runningProcess);
+            runBunOcrPipeline(file.getAbsolutePath(), aiJsonPath, isCancelled, runningProcess, lineCallback);
         } catch (CancellationException e) {
             throw e;
         } catch (IOException | InterruptedException e) {
@@ -1363,44 +1367,70 @@ public class Main {
             || (workerRef.get() != null && workerRef.get().isCancelled())
             || Thread.currentThread().isInterrupted();
 
-        // Delete any stale OCR preview image from a previous run
-        File ocrPreviewFile = new File(System.getProperty("java.io.tmpdir"), "ocr_preview.png");
+        // Delete any stale OCR preview images from a previous run
+        File tmpDir = new File(System.getProperty("java.io.tmpdir"));
+        File ocrPreviewFile = new File(tmpDir, "ocr_preview.png");
         if (ocrPreviewFile.exists()) ocrPreviewFile.delete();
+        // Clean up per-page previews from previous runs
+        for (File f : tmpDir.listFiles((dir, name) -> name.startsWith("ocr_preview_") && name.endsWith(".png"))) {
+            f.delete();
+        }
 
-        // Create a processing panel that paints the OCR preview image as background
-        AtomicReference<Image> previewImageRef = new AtomicReference<>();
-        JPanel processingPanel = new JPanel(new BorderLayout()) {
-            @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                Image img = previewImageRef.get();
-                if (img != null) {
-                    int pw = getWidth();
-                    int ph = getHeight();
-                    int iw = img.getWidth(null);
-                    int ih = img.getHeight(null);
-                    double scale = Math.min((double) pw / iw, (double) ph / ih);
-                    int dw = (int) (iw * scale);
-                    int dh = (int) (ih * scale);
-                    int x = (pw - dw) / 2;
-                    int y = (ph - dh) / 2;
-                    g.drawImage(img, x, y, dw, dh, null);
-                    // Semi-transparent overlay so text remains readable
-                    g.setColor(new Color(0, 0, 0, 160));
-                    g.fillRect(0, 0, pw, ph);
-                }
-            }
-        };
-        processingPanel.setBackground(new Color(0, 0, 0, 128)); // Semi-transparent black
+        // ── Multi-page tabbed preview panel ─────────────────────────────────
+        // Outer panel: tabs on top (one per page), status + cancel at bottom
+        JPanel processingPanel = new JPanel(new BorderLayout());
+        processingPanel.setBackground(Color.BLACK);
 
-        // Poll for the OCR preview image written by ocr.ts
+        JTabbedPane pageTabs = new JTabbedPane();
+        pageTabs.setTabPlacement(JTabbedPane.TOP);
+        processingPanel.add(pageTabs, BorderLayout.CENTER);
+
+        // Track how many page tabs we've already added
+        AtomicInteger knownPageCount = new AtomicInteger(0);
+
+        // Poll for new per-page preview images written by ocr.ts
         javax.swing.Timer previewTimer = new javax.swing.Timer(500, e -> {
-            if (previewImageRef.get() == null && ocrPreviewFile.exists() && ocrPreviewFile.length() > 0) {
+            // Check for ocr_preview_N.png files we haven't loaded yet
+            int next = knownPageCount.get() + 1;
+            File nextPreview = new File(tmpDir, "ocr_preview_" + next + ".png");
+            while (nextPreview.exists() && nextPreview.length() > 0) {
                 try {
-                    Image img = new ImageIcon(ocrPreviewFile.getAbsolutePath()).getImage();
-                    previewImageRef.set(img);
-                    processingPanel.repaint();
+                    Image img = new ImageIcon(nextPreview.getAbsolutePath()).getImage();
+                    // Create a panel that paints this page's image with a dark overlay
+                    final Image pageImg = img;
+                    JPanel pagePanel = new JPanel(new BorderLayout()) {
+                        @Override
+                        protected void paintComponent(Graphics g) {
+                            super.paintComponent(g);
+                            int pw = getWidth();
+                            int ph = getHeight();
+                            int iw = pageImg.getWidth(null);
+                            int ih = pageImg.getHeight(null);
+                            if (iw > 0 && ih > 0) {
+                                double scale = Math.min((double) pw / iw, (double) ph / ih);
+                                int dw = (int) (iw * scale);
+                                int dh = (int) (ih * scale);
+                                int x = (pw - dw) / 2;
+                                int y = (ph - dh) / 2;
+                                g.drawImage(pageImg, x, y, dw, dh, null);
+                                g.setColor(new Color(0, 0, 0, 160));
+                                g.fillRect(0, 0, pw, ph);
+                            }
+                        }
+                    };
+                    pagePanel.setBackground(Color.BLACK);
+
+                    JLabel pageStatus = new JLabel("Verarbeitung...", SwingConstants.CENTER);
+                    pageStatus.setForeground(Color.WHITE);
+                    pageStatus.setFont(new Font("Arial", Font.BOLD, 18));
+                    pagePanel.add(pageStatus, BorderLayout.CENTER);
+
+                    pageTabs.addTab("Seite " + next, pagePanel);
+                    pageTabs.setSelectedIndex(pageTabs.getTabCount() - 1);
+                    knownPageCount.set(next);
                 } catch (Exception ignored) {}
+                next = knownPageCount.get() + 1;
+                nextPreview = new File(tmpDir, "ocr_preview_" + next + ".png");
             }
         });
         previewTimer.start();
@@ -1408,7 +1438,11 @@ public class Main {
         JLabel processingLabel = new JLabel("Verarbeitung gestartet...", SwingConstants.CENTER);
         processingLabel.setForeground(Color.WHITE);
         processingLabel.setFont(new Font("Arial", Font.BOLD, 24));
-        processingPanel.add(processingLabel, BorderLayout.CENTER);
+        // If no tabs yet, show label as a fallback placeholder
+        JPanel placeholderPanel = new JPanel(new BorderLayout());
+        placeholderPanel.setBackground(Color.BLACK);
+        placeholderPanel.add(processingLabel, BorderLayout.CENTER);
+        pageTabs.addTab("OCR", placeholderPanel);
 
         JPanel processingControlPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
         processingControlPanel.setOpaque(false);
@@ -1442,7 +1476,47 @@ public class Main {
                 // Step 2+3: OCR + AI extraction in one bun call
                 publish("OCR & KI-Analyse (bun/TS)...");
                 processingLabel.setText("OCR & KI-Analyse (bun/TS)...");
-            String aiJsonPath = ocrWithBun(file, isCancelled, runningOcrProcess);
+
+            // Line callback: parse structured log lines from ocr.ts to update page tabs
+            java.util.function.Consumer<String> lineCallback = outputLine -> {
+                // Match "[PAGE N] ..." status lines
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("^\\[PAGE (\\d+)\\] (.+)$").matcher(outputLine);
+                if (m.find()) {
+                    int pageIdx = Integer.parseInt(m.group(1));
+                    String msg = m.group(2);
+                    SwingUtilities.invokeLater(() -> {
+                        // Update the page tab's status label (if tab exists)
+                        // Tab 0 is the placeholder "OCR" tab; page tabs start at index 1+
+                        // But we remove the placeholder once real pages appear
+                        for (int t = 0; t < pageTabs.getTabCount(); t++) {
+                            if (pageTabs.getTitleAt(t).equals("Seite " + pageIdx)) {
+                                Component c = pageTabs.getComponentAt(t);
+                                if (c instanceof JPanel) {
+                                    JPanel pp = (JPanel) c;
+                                    Component center = ((BorderLayout) pp.getLayout())
+                                            .getLayoutComponent(BorderLayout.CENTER);
+                                    if (center instanceof JLabel) {
+                                        ((JLabel) center).setText(msg);
+                                    }
+                                }
+                                pageTabs.setSelectedIndex(t);
+                                break;
+                            }
+                        }
+                    });
+                }
+
+                // Update placeholder label for general progress lines
+                if (outputLine.startsWith("Merging ") || outputLine.startsWith("Merged ")) {
+                    SwingUtilities.invokeLater(() -> processingLabel.setText(outputLine));
+                }
+                if (outputLine.startsWith("Processing page ")) {
+                    SwingUtilities.invokeLater(() -> processingLabel.setText(outputLine));
+                }
+            };
+
+            String aiJsonPath = ocrWithBun(file, isCancelled, runningOcrProcess, lineCallback);
             throwIfCancelled(isCancelled);
 
                 String cachedJson = FileUtils.readFileAsText(aiJsonPath);

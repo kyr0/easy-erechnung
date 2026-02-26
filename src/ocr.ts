@@ -32,7 +32,6 @@ const __dirname = dirname(__filename);
 interface PageResult {
   page: number;
   markdown?: string;
-  invoiceJson?: string;
   error?: string;
 }
 
@@ -262,12 +261,16 @@ class LLMClient {
     const systemMessage = `You are an expert OCR data analyst and accountant.
 Your task: extract invoice data from OCR'd text and output a single JSON object matching the ZUGFeRD invoice format.
 
+The OCR text may come from multiple pages of the same invoice, separated by "--- PAGE N ---" markers.
+You must semantically merge all pages into ONE unified invoice. Different pages may contain different parts of the same invoice (e.g. page 1 has line items, page 2 has payment details/IBAN).
+
 Fundamental rules:
 - Extract data ONLY from the OCR'd document text below. Do NOT invent or hallucinate values.
-- If a field cannot be found in the document, leave it as an empty string "" or 0.0 for numbers.
+- If a field cannot be found in any page, leave it as an empty string "" or 0.0 for numbers.
 - The "Seller" hints (address, tax number) are provided by the user as metadata for the ZUGFeRD output. Extract the actual seller name from the document.
 - InvoiceNumber: look for patterns like "Invoice #", "Rechnungsnummer:", "RE-", "INV-" near the top of the document. Do NOT use LineID values as InvoiceNumber.
 - LineID values ("1", "2", "3") are position numbers in the InvoiceLines array, NOT the InvoiceNumber.
+- Combine line items from ALL pages into one InvoiceLines array. Do NOT duplicate items that appear on multiple pages.
 - Return ONLY the raw JSON object. No markdown, no code fences, no explanation.`;
 
     const userMessage = `Seller address hint (for Seller section): ${sellerAddress}
@@ -525,124 +528,6 @@ function parseArgs(): ParsedArgs {
   return result;
 }
 
-// ── Multi-page merge ──────────────────────────────────────────────────────────
-
-function createEmptyInvoiceTemplate(): Record<string, unknown> {
-  return {
-    Invoice: {
-      InvoiceNumber: '',
-      InvoiceDate: '',
-      DueDate: '',
-      Seller: {
-        Name: '',
-        StreetName: '',
-        City: '',
-        PostalCode: '',
-        CountryCode: '',
-        TaxIdentificationNumber: '',
-      },
-      Buyer: {
-        Name: '',
-        StreetName: '',
-        City: '',
-        PostalCode: '',
-        CountryCode: '',
-        TaxIdentificationNumber: '',
-      },
-      DocumentCurrencyCode: '',
-      IBAN: '',
-      BIC: '',
-      BankName: '',
-      PaymentReceiver: '',
-      PaymentReference: '',
-      Tax: {
-        TaxTypeCode: '',
-        TaxCategoryCode: '',
-        TaxPercentage: 0.0,
-        TaxAmount: 0.0,
-      },
-      MonetarySummation: {
-        LineTotal: 0.0,
-        TaxExclusiveAmount: 0.0,
-        TaxInclusiveAmount: 0.0,
-        PayableAmount: 0.0,
-      },
-      InvoiceLines: [] as unknown[],
-    },
-  };
-}
-
-/**
- * Merges per-page invoice JSONs into a single invoice object.
- * - Strings: longest non-empty value wins
- * - Numbers: largest non-zero value wins
- * - InvoiceLines: concatenated from all pages (no dedup), LineIDs renumbered
- * - Nested objects: recursed field-by-field
- */
-function mergePageJsons(pageJsons: Record<string, unknown>[]): Record<string, unknown> {
-  const template = createEmptyInvoiceTemplate();
-
-  function mergeValue(current: unknown, incoming: unknown, key: string): unknown {
-    // InvoiceLines — concatenate, never overwrite
-    if (key === 'InvoiceLines' && Array.isArray(current) && Array.isArray(incoming)) {
-      return [...current, ...incoming];
-    }
-
-    // Nested object — recurse per field
-    if (
-      current !== null && typeof current === 'object' && !Array.isArray(current) &&
-      incoming !== null && typeof incoming === 'object' && !Array.isArray(incoming)
-    ) {
-      const merged = { ...(current as Record<string, unknown>) };
-      for (const k of Object.keys(incoming as Record<string, unknown>)) {
-        merged[k] = mergeValue(
-          merged[k],
-          (incoming as Record<string, unknown>)[k],
-          k,
-        );
-      }
-      return merged;
-    }
-
-    // String — longest non-empty wins
-    if (typeof current === 'string' && typeof incoming === 'string') {
-      if (!current) return incoming;
-      if (!incoming) return current;
-      return incoming.length > current.length ? incoming : current;
-    }
-
-    // Number — largest non-zero wins
-    if (typeof current === 'number' && typeof incoming === 'number') {
-      if (current === 0) return incoming;
-      if (incoming === 0) return current;
-      return Math.abs(incoming) > Math.abs(current) ? incoming : current;
-    }
-
-    // Fallback: prefer non-empty incoming
-    if (incoming !== undefined && incoming !== null && incoming !== '' && incoming !== 0) {
-      return incoming;
-    }
-    return current;
-  }
-
-  // Fold each page into the template
-  let result = template;
-  for (const pageJson of pageJsons) {
-    result = mergeValue(result, pageJson, '') as Record<string, unknown>;
-  }
-
-  // Renumber InvoiceLines LineIDs sequentially
-  const invoice = result.Invoice as Record<string, unknown> | undefined;
-  if (invoice && Array.isArray(invoice.InvoiceLines)) {
-    invoice.InvoiceLines = (invoice.InvoiceLines as Array<Record<string, unknown>>).map((line, idx) => ({
-      ...line,
-      LineID: String(idx + 1),
-    }));
-  }
-
-  return result;
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -692,67 +577,74 @@ async function main() {
     const results: PageResult[] = [];
 
     for (let i = 0; i < imagePaths.length; i++) {
-      console.log(`\nProcessing page ${i + 1}/${imagePaths.length}...`);
+      const pageNum = i + 1;
+      console.log(`\n════════════════════════════════════════`);
+      console.log(`Processing page ${pageNum}/${imagePaths.length}...`);
+      console.log(`════════════════════════════════════════`);
       const resizedPath = join(tempDir, `resized_${i}.png`);
       await resizeImageToMaxMP(imagePaths[i], resizedPath, 3);
 
-      // Copy the first page preview to a well-known location for the Java UI
+      // Write each page preview to a well-known location for the Java UI
+      const previewPath = join(tmpdir(), `ocr_preview_${pageNum}.png`);
+      copyFileSync(resizedPath, previewPath);
+      console.log(`Preview image for page ${pageNum} written to ${previewPath}`);
+      // Also keep the legacy single-file preview for backwards compat (first page)
       if (i === 0) {
-        const previewPath = join(tmpdir(), 'ocr_preview.png');
-        copyFileSync(resizedPath, previewPath);
-        console.log(`Preview image written to ${previewPath}`);
+        copyFileSync(resizedPath, join(tmpdir(), 'ocr_preview.png'));
       }
 
       try {
-        console.log('Running OCR...');
+        console.log(`[PAGE ${pageNum}] Running OCR (model: ${ocrModel})...`);
+        const ocrT0 = Date.now();
         const markdown = await llm.runOCR(resizedPath);
-        console.error(`[OCR markdown page ${i + 1}]\n${markdown}\n[/OCR markdown]`);
+        console.log(`[PAGE ${pageNum}] OCR completed in ${((Date.now() - ocrT0) / 1000).toFixed(1)}s`);
+        console.error(`[OCR markdown page ${pageNum}]\n${markdown}\n[/OCR markdown]`);
 
-        console.log('Extracting invoice JSON...');
-        const invoiceJson = await llm.convertMarkdownToJson(markdown, sellerAddress, sellerTaxNo);
-
-        results.push({ page: i + 1, markdown, invoiceJson });
-        console.log(`Page ${i + 1} processed successfully`);
+        results.push({ page: pageNum, markdown });
+        console.log(`[PAGE ${pageNum}] ✓ OCR successful`);
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        results.push({ page: i + 1, error: msg });
-        console.error(`ERROR on page ${i + 1}: ${msg}`);
+        results.push({ page: pageNum, error: msg });
+        console.error(`[PAGE ${pageNum}] ✗ OCR FAILED: ${msg}`);
       }
     }
 
-    // Report per-page errors but don't fail silently
+    // Report per-page errors
     const errorPages = results.filter(r => r.error);
-    const successPages = results.filter(r => r.invoiceJson);
+    const successPages = results.filter(r => r.markdown);
 
     if (errorPages.length > 0) {
       for (const ep of errorPages) {
-        console.error(`ERROR: Page ${ep.page} failed: ${ep.error}`);
+        console.error(`ERROR: Page ${ep.page} OCR failed: ${ep.error}`);
       }
     }
 
     if (successPages.length === 0) {
-      throw new Error('All pages failed — no invoice JSON could be produced');
+      throw new Error('All pages failed — no OCR text could be produced');
     }
 
-    // Parse each page's JSON and merge into a single invoice object
-    const pageObjects: Record<string, unknown>[] = [];
-    for (const sp of successPages) {
-      try {
-        const parsed = JSON.parse(sp.invoiceJson ?? '{}');
-        pageObjects.push(parsed);
-      } catch (err) {
-        console.error(`WARNING: Page ${sp.page} produced invalid JSON, skipping: ${err}`);
-      }
+    // Combine all page markdowns into a single document for one LLM call
+    console.log(`\n════════════════════════════════════════`);
+    console.log(`Extracting invoice JSON from ${successPages.length} page(s) (model: ${jsonModel})...`);
+    console.log(`════════════════════════════════════════`);
+
+    const combinedMarkdown = successPages
+      .map(p => `--- PAGE ${p.page} ---\n${p.markdown}`)
+      .join('\n\n');
+
+    const jsonT0 = Date.now();
+    const invoiceJson = await llm.convertMarkdownToJson(combinedMarkdown, sellerAddress, sellerTaxNo);
+    console.log(`JSON extraction completed in ${((Date.now() - jsonT0) / 1000).toFixed(1)}s`);
+
+    // Parse to validate and pretty-print
+    let finalJson: string;
+    try {
+      const parsed = JSON.parse(invoiceJson);
+      finalJson = JSON.stringify(parsed, null, 2);
+    } catch {
+      // If not valid JSON, use raw output — let downstream handle the error
+      finalJson = invoiceJson;
     }
-
-    if (pageObjects.length === 0) {
-      throw new Error('All pages produced invalid JSON — no invoice could be assembled');
-    }
-
-    const merged = mergePageJsons(pageObjects);
-    const finalJson = JSON.stringify(merged, null, 2);
-
-    console.log(`Merged ${pageObjects.length} page(s) into final invoice JSON`);
 
     if (output) {
       writeFileSync(output, finalJson, 'utf-8');
