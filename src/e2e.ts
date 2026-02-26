@@ -10,7 +10,7 @@
  *   bun run src/e2e.ts
  *   bun run src/e2e.ts --base-url http://localhost:11434 \
  *                      --ocr-model glm-ocr:q8_0 \
- *                      --json-model qwen3:1.7b-q4_K_M
+ *                      --json-model qwen3:4b-q8_0
  *
  * Env vars (all optional, CLI flags take precedence):
  *   LLM_BASE_URL   LLM_API_KEY   OCR_MODEL   JSON_MODEL
@@ -64,7 +64,7 @@ function parseConfig(): E2EConfig {
     baseUrl:   process.env.LLM_BASE_URL  ?? 'http://localhost:11434',
     apiKey:    process.env.LLM_API_KEY   ?? 'no-key',
     ocrModel:  process.env.OCR_MODEL     ?? 'glm-ocr:q8_0',
-    jsonModel: process.env.JSON_MODEL    ?? 'qwen3:1.7b-q4_K_M',
+    jsonModel: process.env.JSON_MODEL    ?? 'qwen3:4b-q8_0',
   };
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {

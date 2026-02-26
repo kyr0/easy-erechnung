@@ -13,38 +13,30 @@ else
 fi
 
 # Pull the models
-echo "Pulling glm-ocr model..."
-ollama pull glm-ocr
+echo "Pulling glm-ocr:q8_0 model..."
+ollama pull glm-ocr:q8_0
 
-echo "Pulling qwen3:1.7b-q4_K_M model..."
-ollama pull qwen3:1.7b-q4_K_M
+echo "Pulling qwen3:4b-q8_0 model..."
+ollama pull qwen3:4b-q8_0
 
-# Check if Node.js is installed
-if command -v node &> /dev/null; then
-  NODE_VERSION=$(node --version 2>&1 | sed 's/v//')
-  MAJOR_VERSION=$(echo $NODE_VERSION | cut -d. -f1)
-  echo "Node.js version: $NODE_VERSION"
-  if [ "$MAJOR_VERSION" -lt 18 ]; then
-    echo "Node.js version is below 18. Please upgrade to Node.js 18+"
-    exit 1
-  fi
-else
-  echo "Node.js not found. Installing..."
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    brew install node
-  else
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
-    apt-get install -y nodejs
+echo "Checking Volta installation..."
+if ! command -v volta >/dev/null 2>&1; then
+  echo "Volta is not installed. Installing Volta..."
+  curl -fsSL https://get.volta.sh | bash
+  export VOLTA_HOME="$HOME/.volta"
+  export PATH="$VOLTA_HOME/bin:$PATH"
+  if [[ -n "${GITHUB_PATH:-}" ]]; then
+    echo "$HOME/.volta/bin" >> "$GITHUB_PATH"
   fi
 fi
 
-# Check if pnpm is installed
-if ! command -v pnpm &> /dev/null; then
-  echo "Installing pnpm..."
-  npm install -g pnpm
-fi
+echo "Installing pinned Node..."
+volta install node
+
+echo "Installing Bun..."
+curl -fsSL https://bun.com/install | bash
 
 echo "Installing dependencies..."
-pnpm install
+bun install
 
 echo "Setup complete!"

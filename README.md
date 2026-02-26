@@ -14,6 +14,30 @@
 | 🧠 **Works with Ollama & PaddlePaddle** | Integrates with popular local AI frameworks for flexibility. |
 | 💻 **Cross-Platform** | Runs on **macOS**, **Linux**, and **Windows**. (macOS is the primary tested platform.) |
 
+## 🚀 Setup
+
+```bash
+# Install tooling and dependencies
+bash setup.sh
+```
+
+## 🧾 Usage
+
+Users usually interact with the app via the GUI:
+
+```bash
+# Start the App (Java)
+./start.sh
+```
+
+## 🧑‍💻 Calling the OCR pipeline via Shell
+
+You can also run the OCR pipeline directly via shell:
+
+```bash
+bun run src/ocr.ts --input demo/verify.pdf --output /tmp/test_multipage.json --seller-address "Friedrich-Damm-Str. 8, 80999 München" --seller-tax-no "147/214/00001"
+```
+
 ---
 
 ## 📸 How It Works
@@ -86,56 +110,10 @@ Your new e-Invoice is ready.
 
 ---
 
-## 🚀 Setup
-
-```bash
-# Activate the Python virtual environment
-source venv/bin/activate
-
-# Install dependencies
-python install.py
-
-# Run OCR on a demo invoice
-python ocr.py demo/verify.pdf demo/verify.md
-
-# Compile the App
-./compile.sh
-
-# Start the App
-./start.sh
-```
-
-### OCR Device/Backend Overrides
-
-`ocr.py` now auto-selects the OCR runtime device:
-- uses `gpu:0` when Paddle CUDA is available
-- otherwise falls back to `cpu`
-
-Optional environment variables:
-
-```bash
-# Force Paddle device (examples: cpu, gpu:0)
-export EASY_ERECHNUNG_OCR_DEVICE=gpu:0
-
-# Optional: Use external VL backend/server for acceleration
-# Supported backend values: native, vllm-server, sglang-server, fastdeploy-server
-export EASY_ERECHNUNG_OCR_VL_BACKEND=vllm-server
-export EASY_ERECHNUNG_OCR_VL_SERVER_URL=http://localhost:8000
-```
-
-On macOS with MLX installed, the app prints a hint that PaddleOCR-VL native mode does not directly use MLX. In that case, use an external accelerated backend via the variables above.
-
----
-
 ## 📁 Demo Data
 
 The `demo/` folder contains sample invoice data for testing and demonstration purposes.
 
-## 🧑‍💻 Calling the OCR pipeline via Shell
-
-```bash
-bun run src/ocr.ts --input demo/verify_multipage.pdf --output /tmp/test_multipage_v2.json --seller-address "Friedrich-Damm-Str. 8, 80999 München" --seller-tax-no "147/214/00001"
-```
 ---
 
 ## 📜 License

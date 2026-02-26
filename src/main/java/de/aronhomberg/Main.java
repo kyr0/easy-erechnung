@@ -805,7 +805,7 @@ public class Main {
 
         if (baseUrl.isEmpty())   baseUrl   = "http://localhost:11434";
         if (ocrModel.isEmpty())  ocrModel  = "glm-ocr:q8_0";
-        if (jsonModel.isEmpty()) jsonModel = "qwen3:1.7b-q4_K_M";
+        if (jsonModel.isEmpty()) jsonModel = "qwen3:4b-q8_0";
 
         prefs.put("ApiKey",     ((JTextField) einstellungenFieldsMap.get("API Key")).getText());
         prefs.put("BaseUrl",    baseUrl);
@@ -825,7 +825,7 @@ public class Main {
         ((JTextField) einstellungenFieldsMap.get("API Key")).setText(prefs.get("ApiKey", prefs.get("OpenAIKey", "")));
         ((JTextField) einstellungenFieldsMap.get("Basis URL")).setText(prefs.get("BaseUrl", "http://localhost:11434"));
         ((JTextField) einstellungenFieldsMap.get("OCR-Modell")).setText(prefs.get("OcrModel", "glm-ocr:q8_0"));
-        ((JTextField) einstellungenFieldsMap.get("JSON Modell")).setText(prefs.get("ModelRepo", "qwen3:1.7b-q4_K_M"));
+        ((JTextField) einstellungenFieldsMap.get("JSON Modell")).setText(prefs.get("ModelRepo", "qwen3:4b-q8_0"));
         ((JTextField) einstellungenFieldsMap.get("Steuernummer")).setText(prefs.get("Steuernummer", ""));
         ((JTextField) einstellungenFieldsMap.get("USt-ID")).setText(prefs.get("UStID", ""));
         ((JTextArea) ((JScrollPane) einstellungenFieldsMap.get("Adresse")).getViewport().getView())
@@ -987,7 +987,7 @@ public class Main {
             ocrModel = "glm-ocr:q8_0";
         }
         if (jsonModel == null || jsonModel.trim().isEmpty()) {
-            jsonModel = "qwen3:1.7b-q4_K_M";
+            jsonModel = "qwen3:4b-q8_0";
         }
         // Strip trailing /v1 — ocr.ts normalises itself too, but be consistent
         baseUrl = baseUrl.replaceAll("/v1/?$", "").replaceAll("/$", "");
@@ -1444,6 +1444,28 @@ public class Main {
         placeholderPanel.add(processingLabel, BorderLayout.CENTER);
         pageTabs.addTab("OCR", placeholderPanel);
 
+        // ── JSON extraction tab ─────────────────────────────────────────────
+        JPanel jsonPanel = new JPanel(new BorderLayout());
+        jsonPanel.setBackground(Color.BLACK);
+        JLabel jsonStatusLabel = new JLabel("Warte auf OCR...", SwingConstants.CENTER);
+        jsonStatusLabel.setForeground(Color.WHITE);
+        jsonStatusLabel.setFont(new Font("Arial", Font.BOLD, 18));
+        jsonPanel.add(jsonStatusLabel, BorderLayout.CENTER);
+
+        // Log area for JSON extraction details
+        JTextArea jsonLogArea = new JTextArea();
+        jsonLogArea.setEditable(false);
+        jsonLogArea.setBackground(new Color(30, 30, 30));
+        jsonLogArea.setForeground(new Color(180, 230, 180));
+        jsonLogArea.setFont(new Font("Monospaced", Font.PLAIN, 13));
+        jsonLogArea.setLineWrap(true);
+        jsonLogArea.setWrapStyleWord(true);
+        JScrollPane jsonLogScroll = new JScrollPane(jsonLogArea);
+        jsonLogScroll.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        jsonPanel.add(jsonLogScroll, BorderLayout.CENTER);
+        jsonPanel.add(jsonStatusLabel, BorderLayout.NORTH);
+        pageTabs.addTab("JSON", jsonPanel);
+
         JPanel processingControlPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
         processingControlPanel.setOpaque(false);
         JButton cancelButton = new JButton("Abbrechen");
@@ -1486,9 +1508,6 @@ public class Main {
                     int pageIdx = Integer.parseInt(m.group(1));
                     String msg = m.group(2);
                     SwingUtilities.invokeLater(() -> {
-                        // Update the page tab's status label (if tab exists)
-                        // Tab 0 is the placeholder "OCR" tab; page tabs start at index 1+
-                        // But we remove the placeholder once real pages appear
                         for (int t = 0; t < pageTabs.getTabCount(); t++) {
                             if (pageTabs.getTitleAt(t).equals("Seite " + pageIdx)) {
                                 Component c = pageTabs.getComponentAt(t);
@@ -1507,10 +1526,26 @@ public class Main {
                     });
                 }
 
-                // Update placeholder label for general progress lines
-                if (outputLine.startsWith("Merging ") || outputLine.startsWith("Merged ")) {
-                    SwingUtilities.invokeLater(() -> processingLabel.setText(outputLine));
+                // Match "[JSON] ..." status lines — update JSON tab
+                java.util.regex.Matcher jm = java.util.regex.Pattern
+                        .compile("^\\[JSON\\] (.+)$").matcher(outputLine);
+                if (jm.find()) {
+                    String msg = jm.group(1);
+                    SwingUtilities.invokeLater(() -> {
+                        jsonStatusLabel.setText(msg);
+                        jsonLogArea.append(msg + "\n");
+                        jsonLogArea.setCaretPosition(jsonLogArea.getDocument().getLength());
+                        // Switch to JSON tab
+                        for (int t = 0; t < pageTabs.getTabCount(); t++) {
+                            if (pageTabs.getTitleAt(t).equals("JSON")) {
+                                pageTabs.setSelectedIndex(t);
+                                break;
+                            }
+                        }
+                    });
                 }
+
+                // Update placeholder label for general progress lines
                 if (outputLine.startsWith("Processing page ")) {
                     SwingUtilities.invokeLater(() -> processingLabel.setText(outputLine));
                 }
@@ -1652,7 +1687,10 @@ public class Main {
             PDFRenderer pdfRenderer = new PDFRenderer(document);
             int pageCount = document.getNumberOfPages();
 
-            if (pageCount > 0) {
+            if (pageCount <= 0) return;
+
+            if (pageCount == 1) {
+                // Single page — simple scroll pane, no tabs
                 ImageIcon renderedPage = new ImageIcon(pdfRenderer.renderImageWithDPI(0, 75));
                 JLabel pdfView = new JLabel(renderedPage);
                 JScrollPane scrollPane = new JScrollPane(pdfView);
@@ -1660,12 +1698,33 @@ public class Main {
                 scrollPane.getHorizontalScrollBar().setUnitIncrement(20);
                 configurePdfDropTarget(scrollPane, frame, statusBar, splitPane);
 
-                // Ensure only the left pane is updated
                 SwingUtilities.invokeLater(() -> {
-                    splitPane.setLeftComponent(scrollPane); // Replace the left component
+                    splitPane.setLeftComponent(scrollPane);
                     splitPane.setDividerLocation(512);
-                    splitPane.revalidate(); // Recalculate the layout
-                    splitPane.repaint(); // Redraw the UI
+                    splitPane.revalidate();
+                    splitPane.repaint();
+                });
+            } else {
+                // Multiple pages — tabbed display
+                JTabbedPane pdfTabs = new JTabbedPane();
+                pdfTabs.setTabPlacement(JTabbedPane.TOP);
+
+                for (int i = 0; i < pageCount; i++) {
+                    ImageIcon renderedPage = new ImageIcon(pdfRenderer.renderImageWithDPI(i, 75));
+                    JLabel pdfView = new JLabel(renderedPage);
+                    JScrollPane scrollPane = new JScrollPane(pdfView);
+                    scrollPane.getVerticalScrollBar().setUnitIncrement(20);
+                    scrollPane.getHorizontalScrollBar().setUnitIncrement(20);
+                    pdfTabs.addTab("Seite " + (i + 1), scrollPane);
+                }
+
+                configurePdfDropTarget(pdfTabs, frame, statusBar, splitPane);
+
+                SwingUtilities.invokeLater(() -> {
+                    splitPane.setLeftComponent(pdfTabs);
+                    splitPane.setDividerLocation(512);
+                    splitPane.revalidate();
+                    splitPane.repaint();
                 });
             }
         } catch (IOException e) {

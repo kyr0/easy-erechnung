@@ -9,7 +9,7 @@
  *   bun run src/ocr.ts --input invoice.pdf --output result.json \
  *     [--seller-address "Str. 1, 12345 City"] [--seller-tax-no "123/456/78900"] \
  *     [--base-url http://localhost:11434] [--api-key no-key] \
- *     [--ocr-model glm-ocr:q8_0] [--json-model qwen3:1.7b-q4_K_M]
+ *     [--ocr-model glm-ocr:q8_0] [--json-model qwen3:4b-q8_0]
  *
  * Env vars (all optional, CLI flags take precedence):
  *   LLM_BASE_URL   LLM_API_KEY   OCR_MODEL   JSON_MODEL
@@ -365,7 +365,7 @@ Return ONLY valid JSON matching exactly this structure:
       options: { temperature: 0, num_ctx: 10240 },
     };
 
-    console.log(`JSON extraction via Ollama /api/chat (model: ${this.jsonModel}, think: false)...`);
+    console.log(`[JSON] Sending to LLM (model: ${this.jsonModel})...`);
     const t0 = Date.now();
 
     const response = await fetch(url, {
@@ -375,7 +375,7 @@ Return ONLY valid JSON matching exactly this structure:
       body: JSON.stringify(payload),
     });
 
-    console.log(`JSON extraction response in ${((Date.now() - t0) / 1000).toFixed(1)}s — HTTP ${response.status}`);
+    console.log(`[JSON] LLM response in ${((Date.now() - t0) / 1000).toFixed(1)}s — HTTP ${response.status}`);
 
     if (!response.ok) {
       const body = await response.text().catch(() => '(no body)');
@@ -395,7 +395,7 @@ Return ONLY valid JSON matching exactly this structure:
   /** OpenAI-compatible /v1/chat/completions for remote endpoints */
   private async convertMarkdownViaOpenAI(systemMessage: string, userMessage: string): Promise<string> {
     const url = `${this.baseUrl}/v1/chat/completions`;
-    console.log(`JSON extraction via OpenAI-compat ${url} (model: ${this.jsonModel})...`);
+    console.log(`[JSON] Sending to LLM (model: ${this.jsonModel})...`);
     const t0 = Date.now();
 
     const response = await fetch(url, {
@@ -414,7 +414,7 @@ Return ONLY valid JSON matching exactly this structure:
       }),
     });
 
-    console.log(`JSON extraction response in ${((Date.now() - t0) / 1000).toFixed(1)}s — HTTP ${response.status}`);
+    console.log(`[JSON] LLM response in ${((Date.now() - t0) / 1000).toFixed(1)}s — HTTP ${response.status}`);
 
     if (!response.ok) {
       const body = await response.text().catch(() => '(no body)');
@@ -501,7 +501,7 @@ function parseArgs(): ParsedArgs {
     baseUrl:   process.env.LLM_BASE_URL  ?? 'http://localhost:11434',
     apiKey:    process.env.LLM_API_KEY   ?? '',
     ocrModel:  process.env.OCR_MODEL     ?? 'glm-ocr:q8_0',
-    jsonModel: process.env.JSON_MODEL    ?? 'qwen3:1.7b-q4_K_M',
+    jsonModel: process.env.JSON_MODEL    ?? 'qwen3:4b-q8_0',
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -627,7 +627,7 @@ async function main() {
 
     // Combine all page markdowns into a single document for one LLM call
     console.log(`\n════════════════════════════════════════`);
-    console.log(`Extracting invoice JSON from ${successPages.length} page(s) (model: ${jsonModel})...`);
+    console.log(`[JSON] Extracting invoice JSON from ${successPages.length} page(s) (model: ${jsonModel})...`);
     console.log(`════════════════════════════════════════`);
 
     const combinedMarkdown = successPages
@@ -636,7 +636,7 @@ async function main() {
 
     const jsonT0 = Date.now();
     const invoiceJson = await llm.convertMarkdownToJson(combinedMarkdown, sellerAddress, sellerTaxNo);
-    console.log(`JSON extraction completed in ${((Date.now() - jsonT0) / 1000).toFixed(1)}s`);
+    console.log(`[JSON] Extraction completed in ${((Date.now() - jsonT0) / 1000).toFixed(1)}s`);
 
     // Parse to validate and pretty-print
     let finalJson: string;
@@ -650,7 +650,7 @@ async function main() {
 
     if (output) {
       writeFileSync(output, finalJson, 'utf-8');
-      console.log(`\nInvoice JSON written to ${output}`);
+      console.log(`[JSON] Invoice JSON written to ${output}`);
     } else {
       console.log(finalJson);
     }
