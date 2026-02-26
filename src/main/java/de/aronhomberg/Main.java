@@ -763,17 +763,32 @@ public class Main {
 
         int row = 0;
         for (Map.Entry<String, JComponent> entry : einstellungenFieldsMap.entrySet()) {
+            boolean isMultiLine = entry.getValue() instanceof JScrollPane;
+
             // Add Label
             gbc.gridx = 0;
             gbc.gridy = row;
             gbc.weightx = 0;
+            gbc.weighty = 0;
+            gbc.fill = GridBagConstraints.HORIZONTAL;
+            if (isMultiLine) {
+                gbc.anchor = GridBagConstraints.NORTHWEST;
+            }
             einstellungenTab.add(new JLabel(entry.getKey() + ":"), gbc);
 
             // Add Field
             gbc.gridx = 1;
             gbc.weightx = 1.0;
+            if (isMultiLine) {
+                gbc.fill = GridBagConstraints.BOTH;
+                gbc.weighty = 0.3;
+            } else {
+                gbc.fill = GridBagConstraints.HORIZONTAL;
+                gbc.weighty = 0;
+            }
             einstellungenTab.add(entry.getValue(), gbc);
 
+            gbc.anchor = GridBagConstraints.NORTHWEST;
             row++;
         }
 
@@ -1379,7 +1394,7 @@ public class Main {
         // ── Multi-page tabbed preview panel ─────────────────────────────────
         // Outer panel: tabs on top (one per page), status + cancel at bottom
         JPanel processingPanel = new JPanel(new BorderLayout());
-        processingPanel.setBackground(Color.BLACK);
+        processingPanel.setBackground(UIManager.getColor("Panel.background"));
 
         JTabbedPane pageTabs = new JTabbedPane();
         pageTabs.setTabPlacement(JTabbedPane.TOP);
@@ -1413,15 +1428,15 @@ public class Main {
                                 int x = (pw - dw) / 2;
                                 int y = (ph - dh) / 2;
                                 g.drawImage(pageImg, x, y, dw, dh, null);
-                                g.setColor(new Color(0, 0, 0, 160));
+                                g.setColor(new Color(255, 255, 255, 180));
                                 g.fillRect(0, 0, pw, ph);
                             }
                         }
                     };
-                    pagePanel.setBackground(Color.BLACK);
+                    pagePanel.setBackground(UIManager.getColor("Panel.background"));
 
                     JLabel pageStatus = new JLabel("Verarbeitung...", SwingConstants.CENTER);
-                    pageStatus.setForeground(Color.WHITE);
+                    pageStatus.setForeground(UIManager.getColor("Label.foreground"));
                     pageStatus.setFont(new Font("Arial", Font.BOLD, 18));
                     pagePanel.add(pageStatus, BorderLayout.CENTER);
 
@@ -1436,27 +1451,27 @@ public class Main {
         previewTimer.start();
 
         JLabel processingLabel = new JLabel("Verarbeitung gestartet...", SwingConstants.CENTER);
-        processingLabel.setForeground(Color.WHITE);
+        processingLabel.setForeground(UIManager.getColor("Label.foreground"));
         processingLabel.setFont(new Font("Arial", Font.BOLD, 24));
         // If no tabs yet, show label as a fallback placeholder
         JPanel placeholderPanel = new JPanel(new BorderLayout());
-        placeholderPanel.setBackground(Color.BLACK);
+        placeholderPanel.setBackground(UIManager.getColor("Panel.background"));
         placeholderPanel.add(processingLabel, BorderLayout.CENTER);
         pageTabs.addTab("OCR", placeholderPanel);
 
         // ── JSON extraction tab ─────────────────────────────────────────────
         JPanel jsonPanel = new JPanel(new BorderLayout());
-        jsonPanel.setBackground(Color.BLACK);
+        jsonPanel.setBackground(UIManager.getColor("Panel.background"));
         JLabel jsonStatusLabel = new JLabel("Warte auf OCR...", SwingConstants.CENTER);
-        jsonStatusLabel.setForeground(Color.WHITE);
+        jsonStatusLabel.setForeground(UIManager.getColor("Label.foreground"));
         jsonStatusLabel.setFont(new Font("Arial", Font.BOLD, 18));
         jsonPanel.add(jsonStatusLabel, BorderLayout.CENTER);
 
         // Log area for JSON extraction details
         JTextArea jsonLogArea = new JTextArea();
         jsonLogArea.setEditable(false);
-        jsonLogArea.setBackground(new Color(30, 30, 30));
-        jsonLogArea.setForeground(new Color(180, 230, 180));
+        jsonLogArea.setBackground(UIManager.getColor("TextArea.background"));
+        jsonLogArea.setForeground(UIManager.getColor("TextArea.foreground"));
         jsonLogArea.setFont(new Font("Monospaced", Font.PLAIN, 13));
         jsonLogArea.setLineWrap(true);
         jsonLogArea.setWrapStyleWord(true);
@@ -1546,7 +1561,7 @@ public class Main {
                 }
 
                 // Update placeholder label for general progress lines
-                if (outputLine.startsWith("Processing page ")) {
+                if (outputLine.startsWith("Verarbeite Seite ")) {
                     SwingUtilities.invokeLater(() -> processingLabel.setText(outputLine));
                 }
             };

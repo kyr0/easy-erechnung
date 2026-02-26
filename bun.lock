@@ -5,6 +5,7 @@
     "": {
       "name": "easy-e-rechnung",
       "dependencies": {
+        "date-fns": "^4.1.0",
         "jimp": "^0.16.1",
         "pdf-to-img": "^5.0.0",
       },
@@ -119,6 +120,8 @@
     "buffer-equal": ["buffer-equal@0.0.1", "", {}, "sha512-RgSV6InVQ9ODPdLWJ5UAqBqJBOg370Nz6ZQtRzpt6nUjc8v0St97uJ4PYC6NztqIScrAXafKM3mZPMygSe1ggA=="],
 
     "centra": ["centra@2.7.0", "", { "dependencies": { "follow-redirects": "^1.15.6" } }, "sha512-PbFMgMSrmgx6uxCdm57RUos9Tc3fclMvhLSATYN39XsDV29B89zZ3KA89jmY0vwSGazyU+uerqwa6t+KaodPcg=="],
+
+    "date-fns": ["date-fns@4.1.0", "", {}, "sha512-Ukq0owbQXxa/U3EGtsdVBkR1w7KOQ5gIBqdH2hkvknzZPYvBxb/aa6E8L7tmjFtkwZBu3UXBbjIgPo/Ez4xaNg=="],
 
     "dom-walk": ["dom-walk@0.1.2", "", {}, "sha512-6QvTW9mrGeIegrFXdtQi9pk7O/nSK6lSdXW2eqUspN5LWD7UTji2Fqw5V2YLjBpHEoU9Xl/eUWNpDeZvoyOv2w=="],
 

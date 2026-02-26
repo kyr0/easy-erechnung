@@ -11,8 +11,9 @@
 | 🇪🇺 **EU Compliant** | Generates invoices conforming to **EN 16931**, accepted across all EU member states. |
 | 🔒 **100% Offline & Private** | All processing happens locally on your machine. Your invoice data never leaves your computer. |
 | 🤖 **LocalAI-Powered OCR** | Uses local, open-weight AI models for automatic, high-quality text extraction from PDF invoices. |
-| 🧠 **Works with Ollama & PaddlePaddle** | Integrates with popular local AI frameworks for flexibility. |
-| 💻 **Cross-Platform** | Runs on **macOS**, **Linux**, and **Windows**. (macOS is the primary tested platform.) |
+| 📄 **Multi-Page Support** | Processes multi-page PDF invoices — each page is OCR'd separately, then semantically merged by the LLM into a single structured result. |
+| 🧠 **Works with Ollama** | Integrates with Ollama for local LLM inference. Default models: `glm-ocr:q8_0` (OCR) and `qwen3:4b-q8_0` (JSON extraction). |
+| 💻 **Cross-Platform** | Runs on **macOS**, **Linux**, and **Windows**. (macOS and Linux are the primary tested platforms.) |
 
 ## 🚀 Setup
 
@@ -35,8 +36,25 @@ Users usually interact with the app via the GUI:
 You can also run the OCR pipeline directly via shell:
 
 ```bash
-bun run src/ocr.ts --input demo/verify.pdf --output /tmp/test_multipage.json --seller-address "Friedrich-Damm-Str. 8, 80999 München" --seller-tax-no "147/214/00001"
+# Single-page PDF
+bun run src/ocr.ts --input demo/verify.pdf --output /tmp/result.json \
+  --seller-address "Friedrich-Damm-Str. 8, 80999 München" \
+  --seller-tax-no "147/214/00001"
+
+# Multi-page PDF with custom models
+bun run src/ocr.ts --input demo/verify_multipage.pdf --output /tmp/result.json \
+  --seller-address "Friedrich-Damm-Str. 8, 80999 München" \
+  --seller-tax-no "147/214/00001" \
+  --ocr-model glm-ocr:q8_0 --json-model qwen3:4b-q8_0
 ```
+
+### OCR Pipeline Architecture
+
+1. **PDF → Images** — Each page is rendered as a high-resolution image.
+2. **Image Preprocessing** — Contrast boost, normalization, and resize to max 3MP.
+3. **OCR per Page** — Vision model (`glm-ocr:q8_0`) extracts text as markdown.
+4. **Date Preprocessing** — Date ranges in the OCR text are annotated with day counts (e.g. `DAYS: 31`) to help the LLM correctly set quantities for time-based line items.
+5. **JSON Extraction** — All page markdowns are combined and sent in a single LLM call (`qwen3:4b-q8_0`) to produce a structured ZUGFeRD-compatible JSON.
 
 ---
 
@@ -44,7 +62,7 @@ bun run src/ocr.ts --input demo/verify.pdf --output /tmp/test_multipage.json --s
 
 ### Step 1: Drag & Drop Your Invoice PDF
 
-Simply drag and drop a PDF invoice into the app. The AI-powered OCR will automatically extract the text.
+Simply drag and drop a PDF invoice into the app. Multi-page PDFs are displayed with tabs on the left side. The AI-powered OCR will automatically extract the text from each page.
 
 ![OCR Detection](docs/easy_erechnung_app_ocr_detection.png)
 
@@ -52,7 +70,7 @@ Simply drag and drop a PDF invoice into the app. The AI-powered OCR will automat
 
 ### Step 2: AI Post-Processing
 
-The local AI model analyzes the OCR output and intelligently extracts all relevant invoice data.
+The local AI model analyzes the OCR output and intelligently extracts all relevant invoice data. Progress is shown in real-time with per-page OCR status tabs and a JSON extraction log.
 
 ![AI OCR Post-Processing](docs/easy_erechnung_app_ai_ocr_post.png)
 

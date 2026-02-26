@@ -18,6 +18,7 @@
 import { exec, spawn } from 'child_process';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync } from 'fs';
 import { extname, join, dirname } from 'path';
+import { parse, differenceInDays, isValid } from 'date-fns';
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { createHash } from 'crypto';
@@ -93,16 +94,16 @@ class LLMClient {
     if (!this.isLocalhost()) return;
 
     if (await this.isServerRunning()) {
-      console.log('Ollama server is already running.');
+      console.log('Ollama-Server läuft bereits.');
       return;
     }
 
     if (!(await this.checkOllamaInstalled())) {
-      console.error('ERROR: Ollama is not installed. Please install from https://ollama.com');
+      console.error('FEHLER: Ollama ist nicht installiert. Bitte installieren: https://ollama.com');
       process.exit(1);
     }
 
-    console.log('Ollama server is not running. Starting it...');
+    console.log('Ollama-Server läuft nicht. Wird gestartet...');
     const ollamaServe = spawn('ollama', ['serve'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
@@ -114,7 +115,7 @@ class LLMClient {
     });
 
     ollamaServe.on('error', (err) => {
-      console.error(`ERROR: Failed to start ollama serve: ${err.message}`);
+      console.error(`FEHLER: ollama serve konnte nicht gestartet werden: ${err.message}`);
       process.exit(1);
     });
 
@@ -124,13 +125,13 @@ class LLMClient {
     const start = Date.now();
     while (Date.now() - start < maxWaitMs) {
       if (await this.isServerRunning()) {
-        console.log('Ollama server is now running.');
+        console.log('Ollama-Server läuft jetzt.');
         return;
       }
       await new Promise(r => setTimeout(r, 500));
     }
 
-    console.error(`ERROR: Ollama server did not become ready within ${maxWaitMs / 1000}s.`);
+    console.error(`FEHLER: Ollama-Server wurde innerhalb von ${maxWaitMs / 1000}s nicht bereit.`);
     process.exit(1);
   }
 
@@ -157,12 +158,12 @@ class LLMClient {
       // ignore — try pulling
     }
 
-    console.log(`Pulling model ${model}...`);
+    console.log(`Lade Modell ${model} herunter...`);
     const child = spawn('ollama', ['pull', model], { stdio: 'inherit' });
     await new Promise<void>((resolve, reject) => {
       child.on('close', (code: number) => {
         if (code === 0) resolve();
-        else reject(new Error(`Failed to pull model ${model}: exit code ${code}`));
+        else reject(new Error(`Modell ${model} konnte nicht geladen werden: Exit-Code ${code}`));
       });
       child.on('error', reject);
     });
@@ -205,12 +206,12 @@ class LLMClient {
 
     if (!response.ok) {
       const body = await response.text().catch(() => '(no body)');
-      throw new Error(`OCR request failed (Ollama /api/chat): HTTP ${response.status} — ${body}`);
+      throw new Error(`OCR-Anfrage fehlgeschlagen (Ollama /api/chat): HTTP ${response.status} — ${body}`);
     }
 
     const data = await response.json() as { message?: { content?: string } };
     const content = data.message?.content;
-    if (!content) throw new Error('OCR model returned an empty response');
+    if (!content) throw new Error('OCR-Modell lieferte eine leere Antwort');
     return content.trim();
   }
 
@@ -245,12 +246,12 @@ class LLMClient {
 
     if (!response.ok) {
       const body = await response.text().catch(() => '(no body)');
-      throw new Error(`OCR request failed: HTTP ${response.status} — ${body}`);
+      throw new Error(`OCR-Anfrage fehlgeschlagen: HTTP ${response.status} — ${body}`);
     }
 
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new Error('OCR model returned an empty response');
+    if (!content) throw new Error('OCR-Modell lieferte eine leere Antwort');
     return content.trim();
   }
 
@@ -269,9 +270,11 @@ Fundamental rules:
 - If a field cannot be found in any page, leave it as an empty string "" or 0.0 for numbers.
 - The "Seller" hints (address, tax number) are provided by the user as metadata for the ZUGFeRD output. Extract the actual seller name from the document.
 - The "Buyer" is the recipient/addressee of the invoice — the person or company the invoice is sent TO. On German invoices the buyer's name and address appear in the address window block below the sender line (e.g. "Usegroup Inh. Jochen Stärk / Huswertstr. 14 / 60435 Frankfurt"). Extract the buyer Name, StreetName, City, and PostalCode from this block.
-- TaxIdentificationNumber fields must contain ONLY a valid USt-IdNr (e.g. "DE123456789") or Steuernummer (e.g. "147/214/70378"). Customer numbers ("K0100077603"), mandate references, or other IDs are NOT tax IDs — leave the field as "" if no valid tax ID is found.
+- TaxIdentificationNumber fields must contain ONLY a valid USt-IdNr (e.g. "DE123456789") or Steuernummer (e.g. "147/214/00001"). Customer numbers ("K0100077603"), mandate references, or other IDs are NOT tax IDs — leave the field as "" if no valid tax ID is found.
 - InvoiceNumber: look for patterns like "Invoice #", "Rechnungsnummer:", "RE-", "INV-" near the top of the document. Do NOT use LineID values as InvoiceNumber.
 - LineID values ("1", "2", "3") are position numbers in the InvoiceLines array, NOT the InvoiceNumber.
+- IBAN, BIC, and BankName usually appear at the very top or very bottom of a page. Look in headers/footers across all pages.
+- When a line item description contains a date range, the unit is DAY and the quantity is the number of days in that range. The preprocessed text may include a "DAYS: N" annotation — use that value as the Quantity.
 - Combine line items from ALL pages into one InvoiceLines array. Do NOT duplicate items that appear on multiple pages.
 - Return ONLY the raw JSON object. No markdown, no code fences, no explanation.`;
 
@@ -365,7 +368,7 @@ Return ONLY valid JSON matching exactly this structure:
       options: { temperature: 0, num_ctx: 10240 },
     };
 
-    console.log(`[JSON] Sending to LLM (model: ${this.jsonModel})...`);
+    console.log(`[JSON] Sende an LLM (Modell: ${this.jsonModel})...`);
     const t0 = Date.now();
 
     const response = await fetch(url, {
@@ -375,16 +378,16 @@ Return ONLY valid JSON matching exactly this structure:
       body: JSON.stringify(payload),
     });
 
-    console.log(`[JSON] LLM response in ${((Date.now() - t0) / 1000).toFixed(1)}s — HTTP ${response.status}`);
+    console.log(`[JSON] LLM-Antwort in ${((Date.now() - t0) / 1000).toFixed(1)}s — HTTP ${response.status}`);
 
     if (!response.ok) {
       const body = await response.text().catch(() => '(no body)');
-      throw new Error(`JSON extraction request failed (Ollama /api/chat): HTTP ${response.status} — ${body}`);
+      throw new Error(`JSON-Extraktion fehlgeschlagen (Ollama /api/chat): HTTP ${response.status} — ${body}`);
     }
 
     const data = await response.json() as { message?: { content?: string } };
     const content = data.message?.content;
-    if (!content) throw new Error(`JSON model (${this.jsonModel}) returned an empty response`);
+    if (!content) throw new Error(`JSON-Modell (${this.jsonModel}) lieferte eine leere Antwort`);
 
     return content.trim()
       .replace(/^```(?:json)?\s*/i, '')
@@ -395,7 +398,7 @@ Return ONLY valid JSON matching exactly this structure:
   /** OpenAI-compatible /v1/chat/completions for remote endpoints */
   private async convertMarkdownViaOpenAI(systemMessage: string, userMessage: string): Promise<string> {
     const url = `${this.baseUrl}/v1/chat/completions`;
-    console.log(`[JSON] Sending to LLM (model: ${this.jsonModel})...`);
+    console.log(`[JSON] Sende an LLM (Modell: ${this.jsonModel})...`);
     const t0 = Date.now();
 
     const response = await fetch(url, {
@@ -414,16 +417,16 @@ Return ONLY valid JSON matching exactly this structure:
       }),
     });
 
-    console.log(`[JSON] LLM response in ${((Date.now() - t0) / 1000).toFixed(1)}s — HTTP ${response.status}`);
+    console.log(`[JSON] LLM-Antwort in ${((Date.now() - t0) / 1000).toFixed(1)}s — HTTP ${response.status}`);
 
     if (!response.ok) {
       const body = await response.text().catch(() => '(no body)');
-      throw new Error(`JSON extraction request failed: HTTP ${response.status} — ${body}`);
+      throw new Error(`JSON-Extraktion fehlgeschlagen: HTTP ${response.status} — ${body}`);
     }
 
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new Error(`JSON model (${this.jsonModel}) returned an empty response`);
+    if (!content) throw new Error(`JSON-Modell (${this.jsonModel}) lieferte eine leere Antwort`);
 
     return content.trim()
       .replace(/^```(?:json)?\s*/i, '')
@@ -432,17 +435,55 @@ Return ONLY valid JSON matching exactly this structure:
   }
 }
 
+// ── Markdown preprocessing ────────────────────────────────────────────────────
+
+/** Common date formats found on German/European invoices */
+const DATE_FORMATS = ['dd.MM.yyyy', 'dd/MM/yyyy', 'yyyy-MM-dd', 'dd-MM-yyyy'];
+
+/**
+ * Scan each line for date ranges (two dates on the same line).
+ * When found, calculate the difference in days and append "DAYS: N".
+ */
+function preprocessMarkdownDates(markdown: string): string {
+  // Match date-like tokens: dd.MM.yyyy, dd/MM/yyyy, yyyy-MM-dd, dd-MM-yyyy
+  const dateTokenRe = /\b(\d{1,4}[.\-/]\d{1,2}[.\-/]\d{1,4})\b/g;
+
+  return markdown
+    .split('\n')
+    .map(line => {
+      const tokens: Date[] = [];
+      for (const m of line.matchAll(dateTokenRe)) {
+        for (const fmt of DATE_FORMATS) {
+          const d = parse(m[1], fmt, new Date());
+          if (isValid(d) && d.getFullYear() >= 1990 && d.getFullYear() <= 2099) {
+            tokens.push(d);
+            break;
+          }
+        }
+      }
+      // If we found exactly a date range (2 dates), annotate with day count
+      if (tokens.length >= 2) {
+        const days = Math.abs(differenceInDays(tokens[tokens.length - 1], tokens[0]));
+        if (days > 0 && !line.includes('DAYS:')) {
+          return `${line}  DAYS: ${days}`;
+        }
+      }
+      return line;
+    })
+    .join('\n');
+}
+
 // ── File helpers ──────────────────────────────────────────────────────────────
 
 async function detectFileType(filePath: string): Promise<'pdf' | 'image'> {
   const ext = extname(filePath).toLowerCase();
   if (ext === '.pdf') return 'pdf';
   if (['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) return 'image';
-  throw new Error(`Unsupported file type: ${ext}`);
+  throw new Error(`Nicht unterstützter Dateityp: ${ext}`);
 }
 
 async function convertPdfToImages(pdfPath: string, tempDir: string): Promise<string[]> {
-  console.log(`Converting PDF to images: ${pdfPath}`);
+  console.log(`PDF wird in Bilder konvertiert: ${pdfPath}`);
   const { pdf } = await import('pdf-to-img');
   const pdfBuffer = readFileSync(pdfPath);
   const document = await pdf(pdfBuffer, { scale: 3 });
@@ -454,7 +495,7 @@ async function convertPdfToImages(pdfPath: string, tempDir: string): Promise<str
     imagePaths.push(outputPath);
     counter++;
   }
-  console.log(`Extracted ${document.length} pages from PDF`);
+  console.log(`${document.length} Seiten aus PDF extrahiert`);
   return imagePaths;
 }
 
@@ -467,6 +508,19 @@ async function resizeImageToMaxMP(inputPath: string, outputPath: string, maxMP =
   // Boost contrast for better OCR: increase contrast and normalize
   image.contrast(0.75);
   image.normalize();
+
+  // Convert to greyscale then threshold so even light grey text becomes black
+  image.greyscale();
+  // Scan every pixel: anything below the threshold → black, else → white
+  const threshold = 180; // 0–255; lighter greys (< 180) become black
+  image.scan(0, 0, image.getWidth(), image.getHeight(), function (_x, _y, idx) {
+    const grey = this.bitmap.data[idx]; // R=G=B after greyscale
+    const val = grey < threshold ? 0 : 255;
+    this.bitmap.data[idx]     = val; // R
+    this.bitmap.data[idx + 1] = val; // G
+    this.bitmap.data[idx + 2] = val; // B
+    // alpha (idx+3) untouched
+  });
 
   const currentMP = (image.getWidth() * image.getHeight()) / 1_000_000;
   if (currentMP > maxMP) {
@@ -518,12 +572,12 @@ function parseArgs(): ParsedArgs {
   }
 
   if (!result.input) {
-    console.error('Usage: ocr --input <file> [--output <file>]');
-    console.error('           [--seller-address <addr>] [--seller-tax-no <taxno>]');
-    console.error('           [--base-url <url>] [--api-key <key>]');
-    console.error('           [--ocr-model <model>] [--json-model <model>]');
+    console.error('Verwendung: ocr --input <Datei> [--output <Datei>]');
+    console.error('               [--seller-address <Adresse>] [--seller-tax-no <StNr>]');
+    console.error('               [--base-url <URL>] [--api-key <Schlüssel>]');
+    console.error('               [--ocr-model <Modell>] [--json-model <Modell>]');
     console.error('');
-    console.error('Env vars (overridden by CLI flags): LLM_BASE_URL  LLM_API_KEY  OCR_MODEL  JSON_MODEL');
+    console.error('Umgebungsvariablen (CLI überschreibt): LLM_BASE_URL  LLM_API_KEY  OCR_MODEL  JSON_MODEL');
     process.exit(1);
   }
 
@@ -548,19 +602,19 @@ async function main() {
 
   const llm = new LLMClient(baseUrl, apiKey, ocrModel, jsonModel);
 
-  console.log(`LLM endpoint : ${baseUrl}`);
-  console.log(`API key      : ${apiKey ? '(set)' : '(empty)'}`);
-  console.log(`OCR model    : ${ocrModel}`);
-  console.log(`JSON model   : ${jsonModel}`);
+  console.log(`LLM-Endpunkt : ${baseUrl}`);
+  console.log(`API-Schlüssel: ${apiKey ? '(gesetzt)' : '(leer)'}`);
+  console.log(`OCR-Modell   : ${ocrModel}`);
+  console.log(`JSON-Modell  : ${jsonModel}`);
   console.log('');
 
-  console.log('Ensuring LLM server is available...');
+  console.log('Prüfe ob LLM-Server erreichbar ist...');
   await llm.ensureServerRunning();
 
-  console.log(`Ensuring OCR model "${ocrModel}" is available...`);
+  console.log(`Prüfe ob OCR-Modell "${ocrModel}" verfügbar ist...`);
   await llm.ensureModelReady(ocrModel);
 
-  console.log(`Ensuring JSON model "${jsonModel}" is available...`);
+  console.log(`Prüfe ob JSON-Modell "${jsonModel}" verfügbar ist...`);
   await llm.ensureModelReady(jsonModel);
 
   const fileType = await detectFileType(input);
@@ -581,7 +635,7 @@ async function main() {
     for (let i = 0; i < imagePaths.length; i++) {
       const pageNum = i + 1;
       console.log(`\n════════════════════════════════════════`);
-      console.log(`Processing page ${pageNum}/${imagePaths.length}...`);
+      console.log(`Verarbeite Seite ${pageNum}/${imagePaths.length}...`);
       console.log(`════════════════════════════════════════`);
       const resizedPath = join(tempDir, `resized_${i}.png`);
       await resizeImageToMaxMP(imagePaths[i], resizedPath, 3);
@@ -589,25 +643,25 @@ async function main() {
       // Write each page preview to a well-known location for the Java UI
       const previewPath = join(tmpdir(), `ocr_preview_${pageNum}.png`);
       copyFileSync(resizedPath, previewPath);
-      console.log(`Preview image for page ${pageNum} written to ${previewPath}`);
+      console.log(`Vorschaubild für Seite ${pageNum} gespeichert unter ${previewPath}`);
       // Also keep the legacy single-file preview for backwards compat (first page)
       if (i === 0) {
         copyFileSync(resizedPath, join(tmpdir(), 'ocr_preview.png'));
       }
 
       try {
-        console.log(`[PAGE ${pageNum}] Running OCR (model: ${ocrModel})...`);
+        console.log(`[PAGE ${pageNum}] Starte OCR (Modell: ${ocrModel})...`);
         const ocrT0 = Date.now();
         const markdown = await llm.runOCR(resizedPath);
-        console.log(`[PAGE ${pageNum}] OCR completed in ${((Date.now() - ocrT0) / 1000).toFixed(1)}s`);
+        console.log(`[PAGE ${pageNum}] OCR abgeschlossen in ${((Date.now() - ocrT0) / 1000).toFixed(1)}s`);
         console.error(`[OCR markdown page ${pageNum}]\n${markdown}\n[/OCR markdown]`);
 
         results.push({ page: pageNum, markdown });
-        console.log(`[PAGE ${pageNum}] ✓ OCR successful`);
+        console.log(`[PAGE ${pageNum}] ✓ OCR erfolgreich`);
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         results.push({ page: pageNum, error: msg });
-        console.error(`[PAGE ${pageNum}] ✗ OCR FAILED: ${msg}`);
+        console.error(`[PAGE ${pageNum}] ✗ OCR fehlgeschlagen: ${msg}`);
       }
     }
 
@@ -617,26 +671,29 @@ async function main() {
 
     if (errorPages.length > 0) {
       for (const ep of errorPages) {
-        console.error(`ERROR: Page ${ep.page} OCR failed: ${ep.error}`);
+        console.error(`FEHLER: Seite ${ep.page} OCR fehlgeschlagen: ${ep.error}`);
       }
     }
 
     if (successPages.length === 0) {
-      throw new Error('All pages failed — no OCR text could be produced');
+      throw new Error('Alle Seiten fehlgeschlagen — kein OCR-Text konnte erzeugt werden');
     }
 
     // Combine all page markdowns into a single document for one LLM call
     console.log(`\n════════════════════════════════════════`);
-    console.log(`[JSON] Extracting invoice JSON from ${successPages.length} page(s) (model: ${jsonModel})...`);
+    console.log(`[JSON] Extrahiere Rechnungsdaten aus ${successPages.length} Seite(n) (Modell: ${jsonModel})...`);
     console.log(`════════════════════════════════════════`);
 
     const combinedMarkdown = successPages
       .map(p => `--- PAGE ${p.page} ---\n${p.markdown}`)
       .join('\n\n');
 
+    // Pre-process: annotate date ranges with day counts so the LLM can use them
+    const preprocessedMarkdown = preprocessMarkdownDates(combinedMarkdown);
+
     const jsonT0 = Date.now();
-    const invoiceJson = await llm.convertMarkdownToJson(combinedMarkdown, sellerAddress, sellerTaxNo);
-    console.log(`[JSON] Extraction completed in ${((Date.now() - jsonT0) / 1000).toFixed(1)}s`);
+    const invoiceJson = await llm.convertMarkdownToJson(preprocessedMarkdown, sellerAddress, sellerTaxNo);
+    console.log(`[JSON] Extraktion abgeschlossen in ${((Date.now() - jsonT0) / 1000).toFixed(1)}s`);
 
     // Parse to validate and pretty-print
     let finalJson: string;
@@ -650,7 +707,7 @@ async function main() {
 
     if (output) {
       writeFileSync(output, finalJson, 'utf-8');
-      console.log(`[JSON] Invoice JSON written to ${output}`);
+      console.log(`[JSON] Rechnungs-JSON gespeichert unter ${output}`);
     } else {
       console.log(finalJson);
     }
@@ -660,7 +717,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('FATAL ERROR:', error instanceof Error ? error.message : String(error));
+  console.error('SCHWERWIEGENDER FEHLER:', error instanceof Error ? error.message : String(error));
   if (error instanceof Error && error.stack) {
     console.error(error.stack);
   }

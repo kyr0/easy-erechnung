@@ -29,8 +29,8 @@ const DEMO_PDF        = join(projectRoot, 'demo', 'verify.pdf');
 const EXPECTED_AI_JSON = join(projectRoot, 'demo', '_verify.ai.json');
 
 // Defaults used when not provided via CLI or env
-const DEFAULT_SELLER_ADDRESS = 'August-Horch-Str. 16, 80999 München';
-const DEFAULT_SELLER_TAX_NO  = '147/214/70378';
+const DEFAULT_SELLER_ADDRESS = 'Friedrich-Damm-Str. 8, 80999 München';
+const DEFAULT_SELLER_TAX_NO  = '147/214/00001';
 
 let exitCode = 0;
 
