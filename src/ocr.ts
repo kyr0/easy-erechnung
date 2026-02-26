@@ -268,6 +268,8 @@ Fundamental rules:
 - Extract data ONLY from the OCR'd document text below. Do NOT invent or hallucinate values.
 - If a field cannot be found in any page, leave it as an empty string "" or 0.0 for numbers.
 - The "Seller" hints (address, tax number) are provided by the user as metadata for the ZUGFeRD output. Extract the actual seller name from the document.
+- The "Buyer" is the recipient/addressee of the invoice — the person or company the invoice is sent TO. On German invoices the buyer's name and address appear in the address window block below the sender line (e.g. "Usegroup Inh. Jochen Stärk / Huswertstr. 14 / 60435 Frankfurt"). Extract the buyer Name, StreetName, City, and PostalCode from this block.
+- TaxIdentificationNumber fields must contain ONLY a valid USt-IdNr (e.g. "DE123456789") or Steuernummer (e.g. "147/214/70378"). Customer numbers ("K0100077603"), mandate references, or other IDs are NOT tax IDs — leave the field as "" if no valid tax ID is found.
 - InvoiceNumber: look for patterns like "Invoice #", "Rechnungsnummer:", "RE-", "INV-" near the top of the document. Do NOT use LineID values as InvoiceNumber.
 - LineID values ("1", "2", "3") are position numbers in the InvoiceLines array, NOT the InvoiceNumber.
 - Combine line items from ALL pages into one InvoiceLines array. Do NOT duplicate items that appear on multiple pages.
