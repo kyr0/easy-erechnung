@@ -43,3 +43,7 @@ bin/
 
 ocr-env
 venv
+.tmp*
+node_modules/
+
+verify_multipage.pdf

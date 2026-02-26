@@ -1,15 +1,10 @@
 package de.aronhomberg;
-
-import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.Date;
-import java.util.GregorianCalendar;
 import java.util.List;
-import java.util.Locale;
 
 import org.mustangproject.ZUGFeRD.*;
 
@@ -40,6 +35,7 @@ public class ZUGFeRDInvoiceWriter implements IExportableTransaction {
 
             System.out.println("ZUGFeRD invoice generated successfully at: " + outputPdfPath);
 
+            ze.close();
             return outputPdfPath;
         } catch (IOException e) {
             e.printStackTrace();

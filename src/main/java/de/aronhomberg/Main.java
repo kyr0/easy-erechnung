@@ -20,113 +20,34 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Locale;
 import javax.swing.*;
+import javax.swing.border.Border;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.text.NumberFormatter;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.dnd.*;
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.text.NumberFormat;
 import java.text.ParseException;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.BooleanSupplier;
 import java.util.prefs.Preferences;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
-
-import okhttp3.*;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.DeserializationFeature;
 
 public class Main {
     private static final Preferences prefs = Preferences.userNodeForPackage(Main.class);
-
-    private static final String EXTRACTION_PROMPT = """
-            You are an expert OCR data analyst and accountant. Given the following information (PPOCR JSON and Markdown), construct a JSON that optimally has all fields to describe a ZUGFeRD invoice.\s
-            The OCRed document is an invoice that is to be sent to a company whom I worked for.\s
-            Return only JSON (to be parsed as JSON directly, without any Markdown formatting).\s
-            The response data format MUST match. Do not add or remove any fields.\s
-            Additional rules:\s
-            - Analyze the type of unit per invoice position. It can be either: HUR, DAY or PCE\s
-              - HUR: per hour, DAY: per day (often referred to as PT, MT), PCE: per unit\s
-
-            Seller address:\s
-            ${SELLER_ADDRESS}
-
-            Seller Steuernummer: ${SELLER_TAX_NO}
-
-            PPOCRed JSON data:
-            ${PPOCR_RESULT}
-
-            OCRed Markdown data:
-            ${MD_RESULT}
-
-            JSON response format (MUST match!, MUST NOT include Markdown formatting. This will be parsed!):\s
-            {
-              "Invoice": {
-                "InvoiceNumber": "INV-20250108-001",
-                "InvoiceDate": "2025-01-08",
-                "DueDate": "2025-01-22",
-                "Seller": {
-                  "Name": "Example Seller GmbH",
-                  "StreetName": "Musterstraße 1",
-                  "City": "Musterstadt",
-                  "PostalCode": "12345",
-                  "CountryCode": "DE",
-                  "TaxIdentificationNumber": "DE123456789"
-                },
-                "Buyer": {
-                  "Name": "Example Buyer GmbH",
-                  "StreetName": "Käuferstraße 2",
-                  "City": "Käuferstadt",
-                  "PostalCode": "54321",
-                  "CountryCode": "DE",
-                  "TaxIdentificationNumber": "DE987654321"
-                },
-                "DocumentCurrencyCode": "EUR",
-                "PaymentMeans": {
-                  "Type": "42",
-                  "PaymentInformation": {
-                    "PaymentReceiver": "Max Mustermann",
-                    "IBAN": "DE89370400440532013000",
-                    "BIC": "COBADEFFXXX",
-                    "BankName: "Sparkasse Freising",
-                    "PaymentReference": "INV-20250108-001"
-                  }
-                },
-                "Tax": {
-                  "TaxTypeCode": "VAT",
-                  "TaxCategoryCode": "S",
-                  "TaxPercentage": 19.00,
-                  "TaxAmount": 9.50
-                },
-                "MonetarySummation": {
-                  "LineTotal": 50.00,
-                  "TaxExclusiveAmount": 50.00,
-                  "TaxInclusiveAmount": 59.50,
-                  "PayableAmount": 59.50
-                },
-                "InvoiceLines": [
-                  {
-                    "LineID": "1",
-                    "ProductName": "Example Product",
-                    "Unit": "PCE",
-                    "Quantity": 1.0,
-                    "UnitPrice": 50.00,
-                    "LineTotalAmount": 50.00,
-                    "TaxCategoryCode": "S",
-                    "TaxPercentage": 19.00
-                  }
-                ]
-              }
-            }
-                """;
 
     private static final String TITLE = "e@sy e-Rechnung by Aron Homberg";
     private static final String DRAG_DROP_LABEL = "PDF-Rechnung hier ablegen";
@@ -178,7 +99,7 @@ public class Main {
                 dragDropPanel, // Left side
                 tabbedPane // Right side
         );
-        splitPane.setDividerLocation(1024); // Initial divider position
+        splitPane.setDividerLocation(640); // Initial divider position — show settings on the right
 
         configureDragAndDrop(dragDropPanel, dragDropLabel, frame, statusBar, splitPane);
 
@@ -251,6 +172,7 @@ public class Main {
         tabbedPane.addTab("Positionen", positionenTab);
         tabbedPane.addTab("Summen und Steuern", summenUndSteuernTab);
         tabbedPane.addTab("Einstellungen", einstellungenTab);
+        tabbedPane.setSelectedIndex(3); // Show Einstellungen tab by default
 
         loadEinstellungen();
 
@@ -818,7 +740,8 @@ public class Main {
         // Initialize the fields
         einstellungenFieldsMap.put("API Key", new JPasswordField(30));
         einstellungenFieldsMap.put("Basis URL", new JTextField(30));
-        einstellungenFieldsMap.put("Modell", new JTextField(30));
+        einstellungenFieldsMap.put("OCR-Modell", new JTextField(30));
+        einstellungenFieldsMap.put("JSON Modell", new JTextField(30));
         einstellungenFieldsMap.put("Steuernummer", new JTextField(30));
         einstellungenFieldsMap.put("USt-ID", new JTextField(30));
         JTextArea adresseField = new JTextArea(5, 30);
@@ -875,20 +798,33 @@ public class Main {
     }
 
     private static void saveEinstellungen() {
-        prefs.put("ApiKey", ((JTextField) einstellungenFieldsMap.get("API Key")).getText());
-        prefs.put("BaseUrl", ((JTextField) einstellungenFieldsMap.get("Basis URL")).getText());
-        prefs.put("ModelRepo", ((JTextField) einstellungenFieldsMap.get("Modell")).getText());
+        String baseUrl = ((JTextField) einstellungenFieldsMap.get("Basis URL")).getText().trim();
+        String ocrModel = ((JTextField) einstellungenFieldsMap.get("OCR-Modell")).getText().trim();
+        String jsonModel = ((JTextField) einstellungenFieldsMap.get("JSON Modell")).getText().trim();
+
+        if (baseUrl.isEmpty())   baseUrl   = "http://localhost:11434";
+        if (ocrModel.isEmpty())  ocrModel  = "glm-ocr:q8_0";
+        if (jsonModel.isEmpty()) jsonModel = "qwen3:1.7b-q4_K_M";
+
+        prefs.put("ApiKey",     ((JTextField) einstellungenFieldsMap.get("API Key")).getText());
+        prefs.put("BaseUrl",    baseUrl);
+        prefs.put("OcrModel",   ocrModel);
+        prefs.put("ModelRepo",  jsonModel);
         prefs.put("Steuernummer", ((JTextField) einstellungenFieldsMap.get("Steuernummer")).getText());
-        prefs.put("UStID", ((JTextField) einstellungenFieldsMap.get("USt-ID")).getText());
+        prefs.put("UStID",      ((JTextField) einstellungenFieldsMap.get("USt-ID")).getText());
         prefs.put("Adresse",
                 ((JTextArea) ((JScrollPane) einstellungenFieldsMap.get("Adresse")).getViewport().getView()).getText());
+
+        // Refresh UI to show applied defaults
+        loadEinstellungen();
         JOptionPane.showMessageDialog(null, "Einstellungen gespeichert.", "Speichern", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private static void loadEinstellungen() {
         ((JTextField) einstellungenFieldsMap.get("API Key")).setText(prefs.get("ApiKey", prefs.get("OpenAIKey", "")));
-        ((JTextField) einstellungenFieldsMap.get("Basis URL")).setText(prefs.get("BaseUrl", ""));
-        ((JTextField) einstellungenFieldsMap.get("Modell")).setText(prefs.get("ModelRepo", ""));
+        ((JTextField) einstellungenFieldsMap.get("Basis URL")).setText(prefs.get("BaseUrl", "http://localhost:11434"));
+        ((JTextField) einstellungenFieldsMap.get("OCR-Modell")).setText(prefs.get("OcrModel", "glm-ocr:q8_0"));
+        ((JTextField) einstellungenFieldsMap.get("JSON Modell")).setText(prefs.get("ModelRepo", "qwen3:1.7b-q4_K_M"));
         ((JTextField) einstellungenFieldsMap.get("Steuernummer")).setText(prefs.get("Steuernummer", ""));
         ((JTextField) einstellungenFieldsMap.get("USt-ID")).setText(prefs.get("UStID", ""));
         ((JTextArea) ((JScrollPane) einstellungenFieldsMap.get("Adresse")).getViewport().getView())
@@ -927,6 +863,41 @@ public class Main {
         });
     }
 
+    private static void configurePdfDropTarget(JComponent target, JFrame frame, JLabel statusBar,
+            JSplitPane splitPane) {
+        Border defaultBorder = target.getBorder();
+        Border dragBorder = BorderFactory.createLineBorder(new Color(0, 120, 215), 2);
+
+        new DropTarget(target, new DropTargetListener() {
+            @Override
+            public void dragEnter(DropTargetDragEvent dtde) {
+                target.setBorder(dragBorder);
+            }
+
+            @Override
+            public void dragOver(DropTargetDragEvent dtde) {
+                // No action needed
+            }
+
+            @Override
+            public void dropActionChanged(DropTargetDragEvent dtde) {
+                // No action needed
+            }
+
+            @Override
+            public void dragExit(DropTargetEvent dte) {
+                target.setBorder(defaultBorder);
+            }
+
+            @Override
+            public void drop(DropTargetDropEvent dtde) {
+                target.setBorder(defaultBorder);
+                dtde.acceptDrop(DnDConstants.ACTION_COPY);
+                handleFileDrop(dtde, null, frame, statusBar, splitPane);
+            }
+        });
+    }
+
     private static String generateJsonFilePath(String pdfFilePath, String suffix) {
         File pdfFile = new File(pdfFilePath).getAbsoluteFile(); // Ensure absolute path
         String parentPath = pdfFile.getParent(); // Get the directory of the file
@@ -934,230 +905,164 @@ public class Main {
         return new File(parentPath, "_" + baseName + "." + suffix + ".json").getAbsolutePath();
     }
 
-    private static void runOCRScript(String scriptPath, String pdfFilePath, String jsonFilePath)
-            throws IOException, InterruptedException {
-        // Build the command
-        List<String> command = new ArrayList<>();
-
-        // Use the python from the local venv
-        String currentPath = System.getProperty("user.dir");
-        String pythonExecutable = currentPath + File.separator + "venv" + File.separator + "bin" + File.separator
-                + "python";
-
-        // Fallback or check if exists? For now assume venv structure is standard.
-        // If venv doesn't exist, one might want to fallback to "python3" or "python",
-        // but strictly the dependencies are in venv.
-
-        command.add(pythonExecutable);
-        command.add(scriptPath);
-        command.add(pdfFilePath);
-        command.add(jsonFilePath);
-
-        // Process builder
-        ProcessBuilder processBuilder = new ProcessBuilder(command);
-
-        // Redirect error stream to standard output
-        processBuilder.redirectErrorStream(true);
-
-        // Start the process
-        Process process = processBuilder.start();
-
-        // Read the output
-        try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                System.out.println(line);
-            }
+    /** Resolves the bun executable. Checks EASY_ERECHNUNG_BUN env var first, then PATH. */
+    private static String resolveBunExecutable() {
+        String override = System.getenv("EASY_ERECHNUNG_BUN");
+        if (override != null && !override.trim().isEmpty()) {
+            return override.trim();
         }
+        // bun is expected on PATH after a global install
+        return "bun";
+    }
 
-        // Wait for the process to finish
-        int exitCode = process.waitFor();
-        if (exitCode == 0) {
-            System.out.println("OCR completed successfully. JSON file created at: " + jsonFilePath);
-        } else {
-            System.err.println("OCR script failed with exit code: " + exitCode);
+    private static void throwIfCancelled(BooleanSupplier isCancelled) {
+        if (isCancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+            throw new CancellationException("Verarbeitung wurde abgebrochen.");
         }
     }
 
-    private static String ocr(File file) {
-        // Get the current working directory
+    private static <T> T runWithCancellation(Callable<T> task, BooleanSupplier isCancelled) throws Exception {
+        throwIfCancelled(isCancelled);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "e-rechnung-cancellable-task");
+            thread.setDaemon(true);
+            return thread;
+        });
+
+        Future<T> future = executor.submit(task);
+        try {
+            while (true) {
+                throwIfCancelled(isCancelled);
+                try {
+                    return future.get(250, TimeUnit.MILLISECONDS);
+                } catch (TimeoutException ignored) {
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (cause instanceof Exception) {
+                        throw (Exception) cause;
+                    }
+                    if (cause instanceof Error) {
+                        throw (Error) cause;
+                    }
+                    throw new RuntimeException(cause);
+                }
+            }
+        } finally {
+            future.cancel(true);
+            executor.shutdownNow();
+        }
+    }
+
+    /**
+     * Runs `bun run src/ocr.ts` with the given PDF as input and writes a single
+     * invoice JSON object to outputJsonPath.
+     * LLM settings are read from Java preferences (matching the Einstellungen tab).
+     */
+    private static void runBunOcrPipeline(String pdfFilePath, String outputJsonPath,
+            BooleanSupplier isCancelled, AtomicReference<Process> runningProcess)
+            throws IOException, InterruptedException {
+        throwIfCancelled(isCancelled);
+
         String currentPath = System.getProperty("user.dir");
+        String ocrScriptPath = currentPath + File.separator + "src" + File.separator + "ocr.ts";
+        String bun = resolveBunExecutable();
 
-        // Path to the ocr.py script
-        String ocrScriptPath = currentPath + File.separator + "ocr.py";
+        String sellerTaxNo = prefs.get("Steuernummer", prefs.get("UStID", ""));
+        String sellerAddress = prefs.get("Adresse", "");
+        String baseUrl = prefs.get("BaseUrl", "");
+        String apiKey = prefs.get("ApiKey", prefs.get("OpenAIKey", ""));
+        String ocrModel = prefs.get("OcrModel", "");
+        String jsonModel = prefs.get("ModelRepo", "");
 
-        // Generate JSON file path
-        String jsonFilePath = generateJsonFilePath(file.getAbsolutePath(), "ocr");
-        String pdfFilePath = file.getAbsolutePath();
+        if (baseUrl == null || baseUrl.trim().isEmpty()) {
+            baseUrl = System.getenv("LLM_BASE_URL");
+        }
+        if (baseUrl == null || baseUrl.trim().isEmpty()) {
+            baseUrl = "http://localhost:11434";
+        }
+        if (ocrModel == null || ocrModel.trim().isEmpty()) {
+            ocrModel = "glm-ocr:q8_0";
+        }
+        if (jsonModel == null || jsonModel.trim().isEmpty()) {
+            jsonModel = "qwen3:1.7b-q4_K_M";
+        }
+        // Strip trailing /v1 — ocr.ts normalises itself too, but be consistent
+        baseUrl = baseUrl.replaceAll("/v1/?$", "").replaceAll("/$", "");
 
-        // Print the path
-        System.out.println("Current running path: " + currentPath);
-        System.out.println("OCR program: " + ocrScriptPath);
-        System.out.println("PDF file path: " + pdfFilePath);
-        System.out.println("JSON file path: " + jsonFilePath);
+        List<String> command = new ArrayList<>(List.of(
+                bun, "run", ocrScriptPath,
+                "--input",          pdfFilePath,
+                "--output",         outputJsonPath,
+                "--seller-address", sellerAddress,
+                "--seller-tax-no",  sellerTaxNo,
+                "--base-url",       baseUrl,
+                "--api-key",        apiKey,
+                "--ocr-model",      ocrModel,
+                "--json-model",     jsonModel
+        ));
 
-        System.out.println("JSON file path: " + jsonFilePath);
+        System.out.println("Running bun OCR pipeline:");
+        System.out.println("  " + String.join(" ", command));
 
-        String mdFilePath = jsonFilePath.replace(".json", ".md");
-        File ocrMdFile = new File(mdFilePath);
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.directory(new File(currentPath));
+        pb.redirectErrorStream(true);  // merge stderr → stdout so we see everything
 
-        System.out.println("DEBUG: Checking for cache at: " + mdFilePath);
-        System.out.println("DEBUG: File exists: " + ocrMdFile.exists());
-        System.out.println("DEBUG: File length: " + ocrMdFile.length());
-        System.out.println("DEBUG: File absolute path: " + ocrMdFile.getAbsolutePath());
+        Process process = pb.start();
+        if (runningProcess != null) runningProcess.set(process);
 
-        if (ocrMdFile.exists() && ocrMdFile.length() > 0) {
-            System.out.println("OCR cache found (Markdown). Skipping OCR execution.");
-            return jsonFilePath;
+        try {
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (isCancelled.getAsBoolean()) {
+                        process.destroyForcibly();
+                        throw new CancellationException("OCR wurde abgebrochen.");
+                    }
+                    System.out.println(line);
+                }
+            }
+
+            throwIfCancelled(isCancelled);
+
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                throw new IOException("bun ocr.ts exited with code " + exitCode +
+                        " — check the output above for details");
+            }
+            System.out.println("OCR pipeline completed successfully. Output: " + outputJsonPath);
+        } finally {
+            if (runningProcess != null) runningProcess.compareAndSet(process, null);
+        }
+    }
+
+    /**
+     * Runs the bun/TS OCR+AI pipeline for a single PDF file.
+     * Returns the path to the output JSON file containing the invoice object.
+     * Uses the "ai" suffix so the output can be parsed directly by JsonParser.
+     */
+    private static String ocrWithBun(File file, BooleanSupplier isCancelled,
+            AtomicReference<Process> runningProcess) {
+        throwIfCancelled(isCancelled);
+
+        String aiJsonPath = generateJsonFilePath(file.getAbsolutePath(), "ai");
+        File cacheFile = new File(aiJsonPath);
+
+        if (cacheFile.exists() && cacheFile.length() > 0) {
+            System.out.println("AI cache found. Skipping pipeline execution.");
+            return aiJsonPath;
         }
 
         try {
-            runOCRScript(ocrScriptPath, pdfFilePath, jsonFilePath);
+            runBunOcrPipeline(file.getAbsolutePath(), aiJsonPath, isCancelled, runningProcess);
+        } catch (CancellationException e) {
+            throw e;
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
+            System.err.println("ERROR: bun OCR pipeline failed: " + e.getMessage());
         }
-        return jsonFilePath;
-    }
-
-    private static InvoiceResponse.Invoice analyzeWithAI(String jsonFilePath, String pdfFilePath) {
-        String ocrJsonResult = FileUtils.readFileAsText(jsonFilePath);
-        String ocrMdResult = "";
-        try {
-            ocrMdResult = FileUtils.readFileAsText(jsonFilePath.replace(".json", ".md"));
-        } catch (Exception e) {
-            System.err.println("Markdown file not found or could not be read: " + e.getMessage());
-        }
-
-        if (ocrJsonResult == null) {
-            System.err.println("OCR JSON result is null. Aborting AI analysis.");
-            return null;
-        }
-
-        String sellerTaxNo = prefs.get("Steuernummer", prefs.get("Ust-ID", "-"));
-        String sellerCompanyAddress = prefs.get("Adresse", "-");
-        String postProcessingPrompt = EXTRACTION_PROMPT
-                .replace("${SELLER_ADDRESS}", sellerCompanyAddress.trim())
-                .replace("${SELLER_TAX_NO}", sellerTaxNo)
-                .replace("${PPOCR_RESULT}", ocrJsonResult.trim())
-                .replace("${MD_RESULT}", ocrMdResult != null ? ocrMdResult.trim() : "");
-
-        System.out.println("Prompt: " + postProcessingPrompt);
-
-        return processWithOpenAI(postProcessingPrompt, pdfFilePath);
-    }
-
-    private static InvoiceResponse getInvoiceResponseFromCache(String pdfFilePath) {
-        String aiAnalysisFile = generateJsonFilePath(pdfFilePath, "ai");
-        File cacheFile = new File(aiAnalysisFile);
-        if (cacheFile.exists()) {
-            String cachedContent = FileUtils.readFileAsText(aiAnalysisFile);
-            return JsonParser.parseInvoiceResponse(cachedContent);
-        }
-        return null;
-    }
-
-    private static InvoiceResponse.Invoice processWithOpenAI(String prompt, String pdfFilePath) {
-        try {
-            String aiAnalysisFile = generateJsonFilePath(pdfFilePath, "ai");
-            var invoiceResponse = getInvoiceResponseFromCache(pdfFilePath);
-
-            if (invoiceResponse != null) {
-                return invoiceResponse.invoice;
-            }
-
-            // Build the OpenAI ChatCompletion request
-            String modelRepo = prefs.get("ModelRepo", "Qwen/Qwen3-Omni-30B-A3B-Instruct");
-            String apiKey = prefs.get("ApiKey", prefs.get("OpenAIKey", "no-key"));
-
-            // Initialize OpenAI client
-            String baseUrl = prefs.get("BaseUrl", System.getenv("MLLM_OAI_ENDPOINT"));
-            if (baseUrl == null || baseUrl.isEmpty()) {
-                baseUrl = "http://localhost:8901"; // Default
-            }
-
-            // Auto-append /v1 if missing and likely needed (standard OpenAI behavior)
-            // But we respect exact user input if they know what they are doing, unless it's
-            // just the root domain.
-            if (!baseUrl.endsWith("/v1") && !baseUrl.endsWith("/v1/")) {
-                baseUrl = baseUrl.replaceAll("/$", "") + "/v1";
-            }
-
-            String chatEndpoint = baseUrl + "/chat/completions";
-
-            OkHttpClient client = new OkHttpClient.Builder()
-                    .connectTimeout(600, TimeUnit.SECONDS)
-                    .writeTimeout(600, TimeUnit.SECONDS)
-                    .readTimeout(600, TimeUnit.SECONDS)
-                    .build();
-
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false); // Ignore "prompt_logprobs" etc.
-
-            ObjectNode rootNode = mapper.createObjectNode();
-            rootNode.put("model", modelRepo);
-            rootNode.put("temperature", 0.001);
-
-            ArrayNode messagesNode = rootNode.putArray("messages");
-            ObjectNode systemMessage = messagesNode.addObject();
-            systemMessage.put("role", "system");
-            systemMessage.put("content", prompt);
-
-            String jsonBody = mapper.writeValueAsString(rootNode);
-
-            RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json; charset=utf-8"));
-            Request request = new Request.Builder()
-                    .url(chatEndpoint)
-                    .addHeader("Authorization", "Bearer " + apiKey)
-                    .post(body)
-                    .build();
-
-            try (Response response = client.newCall(request).execute()) {
-                if (!response.isSuccessful()) {
-                    System.err.println("Unexpected code " + response);
-                    System.err.println("Response body: " + response.body().string());
-                    return null;
-                }
-
-                String responseBody = response.body().string();
-                JsonNode responseNode = mapper.readTree(responseBody);
-
-                if (responseNode.has("choices") && responseNode.get("choices").isArray()
-                        && responseNode.get("choices").size() > 0) {
-                    JsonNode choice = responseNode.get("choices").get(0);
-                    String responseContent = choice.get("message").get("content").asText();
-
-                    responseContent = responseContent.replace("```json", "");
-                    responseContent = responseContent.replace("```", "");
-
-                    System.out.println("Generated JSON Response:");
-                    System.out.println(responseContent);
-
-                    // Write the response content to the cache file
-                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(aiAnalysisFile))) {
-                        writer.write(responseContent);
-                        System.out.println("AI analysis written to: " + aiAnalysisFile);
-                    } catch (IOException e) {
-                        System.err.println("Error occurred while writing AI analysis to file.");
-                        e.printStackTrace();
-                    }
-
-                    // Parse and return the response
-                    invoiceResponse = JsonParser.parseInvoiceResponse(responseContent);
-                    if (invoiceResponse != null) {
-                        return invoiceResponse.invoice;
-                    } else {
-                        System.err.println("Error occurred parsing the returned AI analysis response.");
-                    }
-                } else {
-                    System.err.println("Error: No choices in AI analysis returned.");
-                }
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            System.err.println("Failed to process with OpenAI.");
-        }
-        return null;
+        return aiJsonPath;
     }
 
     private static void populateFormWithInvoiceData(InvoiceResponse.Invoice invoice) {
@@ -1185,7 +1090,7 @@ public class Main {
             recipientData.put("PLZ", Optional.ofNullable(invoice.Buyer.PostalCode).orElse(""));
             recipientData.put("Ort", Optional.ofNullable(invoice.Buyer.City).orElse(""));
             recipientData.put("Land", Optional.ofNullable(invoice.Buyer.CountryCode).orElse(""));
-            senderData.put("Steuernummer/Ust-ID", Optional.ofNullable(invoice.Buyer.TaxIdentificationNumber)
+            recipientData.put("Steuernummer/Ust-ID", Optional.ofNullable(invoice.Buyer.TaxIdentificationNumber)
                     .orElse(Optional.ofNullable(invoice.Buyer.TaxVATNumber).orElse("")));
         }
         setRecipientData(recipientData);
@@ -1224,6 +1129,7 @@ public class Main {
                 .setText(Optional.ofNullable(invoice.InvoiceNumber).orElse(""));
 
         if (invoice.PaymentMeans != null && invoice.PaymentMeans.PaymentInformation != null) {
+            // Legacy nested format
             ((JTextField) invoiceDetailsMap.get("IBAN"))
                     .setText(Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.IBAN).orElse(""));
             ((JTextField) invoiceDetailsMap.get("BIC"))
@@ -1235,11 +1141,12 @@ public class Main {
             ((JTextField) invoiceDetailsMap.get("Zahlungsempfänger"))
                     .setText(Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.PaymentReceiver).orElse(""));
         } else {
-            ((JTextField) invoiceDetailsMap.get("IBAN")).setText("");
-            ((JTextField) invoiceDetailsMap.get("BIC")).setText("");
-            ((JTextField) invoiceDetailsMap.get("Bank Name")).setText("");
-            ((JTextField) invoiceDetailsMap.get("Zahlungsreferenz")).setText("");
-            ((JTextField) invoiceDetailsMap.get("Zahlungsempfänger")).setText("");
+            // New flat format
+            ((JTextField) invoiceDetailsMap.get("IBAN")).setText(Optional.ofNullable(invoice.IBAN).orElse(""));
+            ((JTextField) invoiceDetailsMap.get("BIC")).setText(Optional.ofNullable(invoice.BIC).orElse(""));
+            ((JTextField) invoiceDetailsMap.get("Bank Name")).setText(Optional.ofNullable(invoice.BankName).orElse(""));
+            ((JTextField) invoiceDetailsMap.get("Zahlungsreferenz")).setText(Optional.ofNullable(invoice.PaymentReference).orElse(""));
+            ((JTextField) invoiceDetailsMap.get("Zahlungsempfänger")).setText(Optional.ofNullable(invoice.PaymentReceiver).orElse(""));
         }
 
         // Fill summen und steuern fields
@@ -1449,13 +1356,65 @@ public class Main {
     }
 
     private static void processPDF(File file, JLabel statusBar, JFrame frame, JSplitPane splitPane) {
-        // Create a processing panel to temporarily replace the right pane
-        JPanel processingPanel = new JPanel(new BorderLayout());
+        AtomicReference<Process> runningOcrProcess = new AtomicReference<>();
+        AtomicBoolean cancelRequested = new AtomicBoolean(false);
+        AtomicReference<SwingWorker<Void, String>> workerRef = new AtomicReference<>();
+        BooleanSupplier isCancelled = () -> cancelRequested.get()
+            || (workerRef.get() != null && workerRef.get().isCancelled())
+            || Thread.currentThread().isInterrupted();
+
+        // Delete any stale OCR preview image from a previous run
+        File ocrPreviewFile = new File(System.getProperty("java.io.tmpdir"), "ocr_preview.png");
+        if (ocrPreviewFile.exists()) ocrPreviewFile.delete();
+
+        // Create a processing panel that paints the OCR preview image as background
+        AtomicReference<Image> previewImageRef = new AtomicReference<>();
+        JPanel processingPanel = new JPanel(new BorderLayout()) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Image img = previewImageRef.get();
+                if (img != null) {
+                    int pw = getWidth();
+                    int ph = getHeight();
+                    int iw = img.getWidth(null);
+                    int ih = img.getHeight(null);
+                    double scale = Math.min((double) pw / iw, (double) ph / ih);
+                    int dw = (int) (iw * scale);
+                    int dh = (int) (ih * scale);
+                    int x = (pw - dw) / 2;
+                    int y = (ph - dh) / 2;
+                    g.drawImage(img, x, y, dw, dh, null);
+                    // Semi-transparent overlay so text remains readable
+                    g.setColor(new Color(0, 0, 0, 160));
+                    g.fillRect(0, 0, pw, ph);
+                }
+            }
+        };
         processingPanel.setBackground(new Color(0, 0, 0, 128)); // Semi-transparent black
+
+        // Poll for the OCR preview image written by ocr.ts
+        javax.swing.Timer previewTimer = new javax.swing.Timer(500, e -> {
+            if (previewImageRef.get() == null && ocrPreviewFile.exists() && ocrPreviewFile.length() > 0) {
+                try {
+                    Image img = new ImageIcon(ocrPreviewFile.getAbsolutePath()).getImage();
+                    previewImageRef.set(img);
+                    processingPanel.repaint();
+                } catch (Exception ignored) {}
+            }
+        });
+        previewTimer.start();
+
         JLabel processingLabel = new JLabel("Verarbeitung gestartet...", SwingConstants.CENTER);
         processingLabel.setForeground(Color.WHITE);
         processingLabel.setFont(new Font("Arial", Font.BOLD, 24));
         processingPanel.add(processingLabel, BorderLayout.CENTER);
+
+        JPanel processingControlPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        processingControlPanel.setOpaque(false);
+        JButton cancelButton = new JButton("Abbrechen");
+        processingControlPanel.add(cancelButton);
+        processingPanel.add(processingControlPanel, BorderLayout.SOUTH);
 
         // Save the original right component
         Component originalRightComponent = splitPane.getRightComponent();
@@ -1471,22 +1430,26 @@ public class Main {
         SwingWorker<Void, String> worker = new SwingWorker<>() {
             @Override
             protected Void doInBackground() throws Exception {
+            throwIfCancelled(isCancelled);
+
                 // Step 1: Display PDF
                 publish("Lese PDF...");
                 processingLabel.setText("Lese PDF...");
-                displayPDF(file, splitPane);
+                Main.pdfFilePath = file.getAbsolutePath();
+                displayPDF(file, splitPane, frame, statusBar);
+            throwIfCancelled(isCancelled);
 
-                // Step 2: Run OCR
-                publish("KI-Texterkennung (OCR)...");
-                processingLabel.setText("KI-Texterkennung (OCR)...");
-                String ocrJsonResultFilePath = ocr(file);
+                // Step 2+3: OCR + AI extraction in one bun call
+                publish("OCR & KI-Analyse (bun/TS)...");
+                processingLabel.setText("OCR & KI-Analyse (bun/TS)...");
+            String aiJsonPath = ocrWithBun(file, isCancelled, runningOcrProcess);
+            throwIfCancelled(isCancelled);
 
-                String pdfFilePath = file.getAbsolutePath();
-
-                // Step 3: Analyze with AI
-                publish("KI-Analyse der OCR-Ergebnisse...");
-                processingLabel.setText("KI-Analyse der OCR-Ergebnisse...");
-                InvoiceResponse.Invoice invoice = analyzeWithAI(ocrJsonResultFilePath, pdfFilePath);
+                String cachedJson = FileUtils.readFileAsText(aiJsonPath);
+                InvoiceResponse invoiceResponse = cachedJson != null
+                        ? JsonParser.parseInvoiceResponse(cachedJson) : null;
+                InvoiceResponse.Invoice invoice = invoiceResponse != null ? invoiceResponse.invoice : null;
+            throwIfCancelled(isCancelled);
 
                 if (invoice != null) {
                     populateFormWithInvoiceData(invoice);
@@ -1500,12 +1463,18 @@ public class Main {
                 // Step 4: Convert original file to PDF/A
                 publish("Konvertiere zu PDF/A-Format...");
                 processingLabel.setText("Konvertiere zu PDF/A-Format...");
-                String archivePdfFilePath = PdfAConverter.convertToPdfA(pdfFilePath);
+                String archivePdfFilePath = runWithCancellation(() -> PdfAConverter.convertToPdfA(pdfFilePath),
+                        isCancelled);
+                throwIfCancelled(isCancelled);
 
                 // Step 5: Validate PDF/A file
                 publish("Validiere PDF/A-Datei...");
                 processingLabel.setText("Validiere PDF/A-Datei...");
-                PdfAConverter.validatePDFA(archivePdfFilePath);
+                runWithCancellation(() -> {
+                    PdfAConverter.validatePDFA(archivePdfFilePath);
+                    return null;
+                }, isCancelled);
+                throwIfCancelled(isCancelled);
 
                 // update to use archive as current pdfFilePath
                 Main.pdfFilePath = archivePdfFilePath;
@@ -1523,11 +1492,21 @@ public class Main {
             protected void done() {
                 try {
                     get(); // Retrieve result to check for exceptions
-                    statusBar.setText("Bereit");
+                    statusBar.setText(isCancelled() ? "Verarbeitung abgebrochen." : "Bereit");
+                } catch (CancellationException e) {
+                    statusBar.setText("Verarbeitung abgebrochen.");
                 } catch (Exception e) {
                     statusBar.setText("Fehler: " + e.getMessage());
                     e.printStackTrace();
                 } finally {
+                    cancelRequested.set(true);
+                    previewTimer.stop();
+
+                    Process process = runningOcrProcess.getAndSet(null);
+                    if (process != null && process.isAlive()) {
+                        process.destroyForcibly();
+                    }
+
                     // Restore the original right component
                     SwingUtilities.invokeLater(() -> {
                         splitPane.setRightComponent(originalRightComponent);
@@ -1538,6 +1517,25 @@ public class Main {
                 }
             }
         };
+
+        workerRef.set(worker);
+
+        cancelButton.addActionListener(e -> {
+            cancelRequested.set(true);
+            cancelButton.setEnabled(false);
+            processingLabel.setText("Abbrechen läuft...");
+            statusBar.setText("Abbrechen läuft...");
+
+            Process process = runningOcrProcess.get();
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+
+            SwingWorker<Void, String> runningWorker = workerRef.get();
+            if (runningWorker != null) {
+                runningWorker.cancel(true);
+            }
+        });
 
         // Execute the worker
         worker.execute();
@@ -1550,20 +1548,32 @@ public class Main {
                     .getTransferData(DataFlavor.javaFileListFlavor);
             for (File file : droppedFiles) {
                 if (file.getName().toLowerCase().endsWith(".pdf")) {
-                    messageLabel.setText(FILE_ACCEPTED_MSG + file.getName());
+                    if (messageLabel != null) {
+                        messageLabel.setText(FILE_ACCEPTED_MSG + file.getName());
+                    } else if (statusBar != null) {
+                        statusBar.setText(FILE_ACCEPTED_MSG + file.getName());
+                    }
                     processPDF(file, statusBar, frame, splitPane);
 
                 } else {
-                    messageLabel.setText(INVALID_FILE_MSG);
+                    if (messageLabel != null) {
+                        messageLabel.setText(INVALID_FILE_MSG);
+                    } else if (statusBar != null) {
+                        statusBar.setText(INVALID_FILE_MSG);
+                    }
                 }
             }
         } catch (Exception e) {
-            messageLabel.setText(ERROR_MSG);
+            if (messageLabel != null) {
+                messageLabel.setText(ERROR_MSG);
+            } else if (statusBar != null) {
+                statusBar.setText(ERROR_MSG);
+            }
             e.printStackTrace();
         }
     }
 
-    public static void displayPDF(File pdfFile, JSplitPane splitPane) {
+    public static void displayPDF(File pdfFile, JSplitPane splitPane, JFrame frame, JLabel statusBar) {
         try (PDDocument document = Loader.loadPDF(pdfFile)) {
             PDFRenderer pdfRenderer = new PDFRenderer(document);
             int pageCount = document.getNumberOfPages();
@@ -1574,6 +1584,7 @@ public class Main {
                 JScrollPane scrollPane = new JScrollPane(pdfView);
                 scrollPane.getVerticalScrollBar().setUnitIncrement(20);
                 scrollPane.getHorizontalScrollBar().setUnitIncrement(20);
+                configurePdfDropTarget(scrollPane, frame, statusBar, splitPane);
 
                 // Ensure only the left pane is updated
                 SwingUtilities.invokeLater(() -> {

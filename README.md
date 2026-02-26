@@ -105,6 +105,26 @@ python ocr.py demo/verify.pdf demo/verify.md
 ./start.sh
 ```
 
+### OCR Device/Backend Overrides
+
+`ocr.py` now auto-selects the OCR runtime device:
+- uses `gpu:0` when Paddle CUDA is available
+- otherwise falls back to `cpu`
+
+Optional environment variables:
+
+```bash
+# Force Paddle device (examples: cpu, gpu:0)
+export EASY_ERECHNUNG_OCR_DEVICE=gpu:0
+
+# Optional: Use external VL backend/server for acceleration
+# Supported backend values: native, vllm-server, sglang-server, fastdeploy-server
+export EASY_ERECHNUNG_OCR_VL_BACKEND=vllm-server
+export EASY_ERECHNUNG_OCR_VL_SERVER_URL=http://localhost:8000
+```
+
+On macOS with MLX installed, the app prints a hint that PaddleOCR-VL native mode does not directly use MLX. In that case, use an external accelerated backend via the variables above.
+
 ---
 
 ## 📁 Demo Data

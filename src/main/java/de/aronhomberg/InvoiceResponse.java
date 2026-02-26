@@ -17,6 +17,11 @@ public class InvoiceResponse {
         public Party Buyer;
         public String DocumentCurrencyCode;
         public PaymentMeans PaymentMeans;
+        public String IBAN;
+        public String BIC;
+        public String BankName;
+        public String PaymentReceiver;
+        public String PaymentReference;
         public Tax Tax;
         public MonetarySummation MonetarySummation;
         public List<InvoiceLine> InvoiceLines;

@@ -1,6 +1,8 @@
 import sys
 import os
 import shutil
+import platform
+import importlib.util
 import fitz  # PyMuPDF
 from paddleocr import PaddleOCRVL
 
@@ -18,9 +20,52 @@ def pdf_to_pngs(pdf_path, temp_dir):
         image_paths.append(image_path)
     return image_paths
 
+
+def _build_pipeline_kwargs():
+    env_device = os.getenv("EASY_ERECHNUNG_OCR_DEVICE", "").strip()
+    env_backend = os.getenv("EASY_ERECHNUNG_OCR_VL_BACKEND", "").strip()
+    env_server_url = os.getenv("EASY_ERECHNUNG_OCR_VL_SERVER_URL", "").strip()
+
+    kwargs = {}
+
+    if env_device:
+        kwargs["device"] = env_device
+        print(f"OCR device override via EASY_ERECHNUNG_OCR_DEVICE={env_device}")
+    else:
+        try:
+            import paddle
+            if paddle.device.is_compiled_with_cuda():
+                kwargs["device"] = "gpu:0"
+                print("CUDA runtime detected. Using OCR device gpu:0.")
+            else:
+                kwargs["device"] = "cpu"
+                print("No CUDA runtime detected. Falling back to OCR device cpu.")
+        except Exception as e:
+            kwargs["device"] = "cpu"
+            print(f"Could not inspect Paddle runtime ({e}). Falling back to OCR device cpu.")
+
+    if env_backend:
+        kwargs["vl_rec_backend"] = env_backend
+        print(f"VL backend override via EASY_ERECHNUNG_OCR_VL_BACKEND={env_backend}")
+
+    if env_server_url:
+        kwargs["vl_rec_server_url"] = env_server_url
+        print(f"Using external VL server via EASY_ERECHNUNG_OCR_VL_SERVER_URL={env_server_url}")
+
+    is_macos = platform.system().lower() == "darwin"
+    has_mlx = importlib.util.find_spec("mlx") is not None
+    if is_macos and has_mlx and kwargs.get("device") == "cpu" and "vl_rec_server_url" not in kwargs:
+        print(
+            "MLX detected on macOS. Note: PaddleOCR-VL does not directly run with MLX in native mode; "
+            "configure EASY_ERECHNUNG_OCR_VL_BACKEND/EASY_ERECHNUNG_OCR_VL_SERVER_URL for an external accelerated backend."
+        )
+
+    return kwargs
+
 def run_paddleocr(input_path, output_path):
     # Initialize PaddleOCR VL
-    pipeline = PaddleOCRVL()
+    pipeline_kwargs = _build_pipeline_kwargs()
+    pipeline = PaddleOCRVL(**pipeline_kwargs)
 
     # Determine output directory
     if os.path.splitext(output_path)[1]:
