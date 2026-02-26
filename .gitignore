@@ -47,3 +47,5 @@ venv
 node_modules/
 
 verify_multipage.pdf
+
+demo/

@@ -338,7 +338,62 @@ Return ONLY valid JSON matching exactly this structure:
   }
 }`;
 
-    const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+    if (this.isLocalhost()) {
+      return this.convertMarkdownViaOllama(systemMessage, userMessage);
+    }
+    return this.convertMarkdownViaOpenAI(systemMessage, userMessage);
+  }
+
+  /** Ollama-native /api/chat for JSON extraction — avoids /v1 auth issues */
+  private async convertMarkdownViaOllama(systemMessage: string, userMessage: string): Promise<string> {
+    const url = `${this.baseUrl}/api/chat`;
+    const payload = {
+      model: this.jsonModel,
+      messages: [
+        { role: 'system', content: systemMessage },
+        { role: 'user', content: userMessage },
+      ],
+      stream: false,
+      // Disable extended thinking (qwen3 etc.) — without this the model can
+      // spend minutes generating hidden <think> tokens before responding.
+      think: false,
+      options: { temperature: 0, num_ctx: 10240 },
+    };
+
+    console.log(`JSON extraction via Ollama /api/chat (model: ${this.jsonModel}, think: false)...`);
+    const t0 = Date.now();
+
+    const response = await fetch(url, {
+      method: 'POST',
+      signal: AbortSignal.timeout(5 * 60_000),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    console.log(`JSON extraction response in ${((Date.now() - t0) / 1000).toFixed(1)}s — HTTP ${response.status}`);
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '(no body)');
+      throw new Error(`JSON extraction request failed (Ollama /api/chat): HTTP ${response.status} — ${body}`);
+    }
+
+    const data = await response.json() as { message?: { content?: string } };
+    const content = data.message?.content;
+    if (!content) throw new Error(`JSON model (${this.jsonModel}) returned an empty response`);
+
+    return content.trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/, '')
+      .trim();
+  }
+
+  /** OpenAI-compatible /v1/chat/completions for remote endpoints */
+  private async convertMarkdownViaOpenAI(systemMessage: string, userMessage: string): Promise<string> {
+    const url = `${this.baseUrl}/v1/chat/completions`;
+    console.log(`JSON extraction via OpenAI-compat ${url} (model: ${this.jsonModel})...`);
+    const t0 = Date.now();
+
+    const response = await fetch(url, {
       method: 'POST',
       signal: AbortSignal.timeout(5 * 60_000),
       headers: this.authHeaders(),
@@ -354,6 +409,8 @@ Return ONLY valid JSON matching exactly this structure:
       }),
     });
 
+    console.log(`JSON extraction response in ${((Date.now() - t0) / 1000).toFixed(1)}s — HTTP ${response.status}`);
+
     if (!response.ok) {
       const body = await response.text().catch(() => '(no body)');
       throw new Error(`JSON extraction request failed: HTTP ${response.status} — ${body}`);
@@ -363,7 +420,6 @@ Return ONLY valid JSON matching exactly this structure:
     const content = data.choices?.[0]?.message?.content;
     if (!content) throw new Error(`JSON model (${this.jsonModel}) returned an empty response`);
 
-    // Strip markdown code fences that some models add despite being told not to
     return content.trim()
       .replace(/^```(?:json)?\s*/i, '')
       .replace(/\s*```\s*$/, '')
@@ -469,17 +525,144 @@ function parseArgs(): ParsedArgs {
   return result;
 }
 
+// ── Multi-page merge ──────────────────────────────────────────────────────────
+
+function createEmptyInvoiceTemplate(): Record<string, unknown> {
+  return {
+    Invoice: {
+      InvoiceNumber: '',
+      InvoiceDate: '',
+      DueDate: '',
+      Seller: {
+        Name: '',
+        StreetName: '',
+        City: '',
+        PostalCode: '',
+        CountryCode: '',
+        TaxIdentificationNumber: '',
+      },
+      Buyer: {
+        Name: '',
+        StreetName: '',
+        City: '',
+        PostalCode: '',
+        CountryCode: '',
+        TaxIdentificationNumber: '',
+      },
+      DocumentCurrencyCode: '',
+      IBAN: '',
+      BIC: '',
+      BankName: '',
+      PaymentReceiver: '',
+      PaymentReference: '',
+      Tax: {
+        TaxTypeCode: '',
+        TaxCategoryCode: '',
+        TaxPercentage: 0.0,
+        TaxAmount: 0.0,
+      },
+      MonetarySummation: {
+        LineTotal: 0.0,
+        TaxExclusiveAmount: 0.0,
+        TaxInclusiveAmount: 0.0,
+        PayableAmount: 0.0,
+      },
+      InvoiceLines: [] as unknown[],
+    },
+  };
+}
+
+/**
+ * Merges per-page invoice JSONs into a single invoice object.
+ * - Strings: longest non-empty value wins
+ * - Numbers: largest non-zero value wins
+ * - InvoiceLines: concatenated from all pages (no dedup), LineIDs renumbered
+ * - Nested objects: recursed field-by-field
+ */
+function mergePageJsons(pageJsons: Record<string, unknown>[]): Record<string, unknown> {
+  const template = createEmptyInvoiceTemplate();
+
+  function mergeValue(current: unknown, incoming: unknown, key: string): unknown {
+    // InvoiceLines — concatenate, never overwrite
+    if (key === 'InvoiceLines' && Array.isArray(current) && Array.isArray(incoming)) {
+      return [...current, ...incoming];
+    }
+
+    // Nested object — recurse per field
+    if (
+      current !== null && typeof current === 'object' && !Array.isArray(current) &&
+      incoming !== null && typeof incoming === 'object' && !Array.isArray(incoming)
+    ) {
+      const merged = { ...(current as Record<string, unknown>) };
+      for (const k of Object.keys(incoming as Record<string, unknown>)) {
+        merged[k] = mergeValue(
+          merged[k],
+          (incoming as Record<string, unknown>)[k],
+          k,
+        );
+      }
+      return merged;
+    }
+
+    // String — longest non-empty wins
+    if (typeof current === 'string' && typeof incoming === 'string') {
+      if (!current) return incoming;
+      if (!incoming) return current;
+      return incoming.length > current.length ? incoming : current;
+    }
+
+    // Number — largest non-zero wins
+    if (typeof current === 'number' && typeof incoming === 'number') {
+      if (current === 0) return incoming;
+      if (incoming === 0) return current;
+      return Math.abs(incoming) > Math.abs(current) ? incoming : current;
+    }
+
+    // Fallback: prefer non-empty incoming
+    if (incoming !== undefined && incoming !== null && incoming !== '' && incoming !== 0) {
+      return incoming;
+    }
+    return current;
+  }
+
+  // Fold each page into the template
+  let result = template;
+  for (const pageJson of pageJsons) {
+    result = mergeValue(result, pageJson, '') as Record<string, unknown>;
+  }
+
+  // Renumber InvoiceLines LineIDs sequentially
+  const invoice = result.Invoice as Record<string, unknown> | undefined;
+  if (invoice && Array.isArray(invoice.InvoiceLines)) {
+    invoice.InvoiceLines = (invoice.InvoiceLines as Array<Record<string, unknown>>).map((line, idx) => ({
+      ...line,
+      LineID: String(idx + 1),
+    }));
+  }
+
+  return result;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { input, output, sellerAddress, sellerTaxNo, apiKey, ocrModel, jsonModel, baseUrl: rawBaseUrl } = parseArgs();
+  const args = parseArgs();
+  const { input, output, sellerAddress, sellerTaxNo, ocrModel, jsonModel, baseUrl: rawBaseUrl } = args;
 
   // Normalize base URL: strip trailing /v1 so we can always append paths ourselves
   const baseUrl = rawBaseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '');
 
+  // Default empty apiKey to 'no-key' for localhost — Ollama doesn't need one,
+  // but an empty string can cause issues with /v1 compat endpoints.
+  let apiKey = args.apiKey;
+  if (!apiKey && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/)/.test(baseUrl)) {
+    apiKey = 'no-key';
+  }
+
   const llm = new LLMClient(baseUrl, apiKey, ocrModel, jsonModel);
 
   console.log(`LLM endpoint : ${baseUrl}`);
+  console.log(`API key      : ${apiKey ? '(set)' : '(empty)'}`);
   console.log(`OCR model    : ${ocrModel}`);
   console.log(`JSON model   : ${jsonModel}`);
   console.log('');
@@ -551,13 +734,25 @@ async function main() {
       throw new Error('All pages failed — no invoice JSON could be produced');
     }
 
-    // Output: single invoice JSON object from the first successful page
-    const firstSuccess = successPages[0];
-    const finalJson = firstSuccess.invoiceJson ?? '';
-
-    if (!finalJson) {
-      throw new Error('First successful page has no invoice JSON');
+    // Parse each page's JSON and merge into a single invoice object
+    const pageObjects: Record<string, unknown>[] = [];
+    for (const sp of successPages) {
+      try {
+        const parsed = JSON.parse(sp.invoiceJson ?? '{}');
+        pageObjects.push(parsed);
+      } catch (err) {
+        console.error(`WARNING: Page ${sp.page} produced invalid JSON, skipping: ${err}`);
+      }
     }
+
+    if (pageObjects.length === 0) {
+      throw new Error('All pages produced invalid JSON — no invoice could be assembled');
+    }
+
+    const merged = mergePageJsons(pageObjects);
+    const finalJson = JSON.stringify(merged, null, 2);
+
+    console.log(`Merged ${pageObjects.length} page(s) into final invoice JSON`);
 
     if (output) {
       writeFileSync(output, finalJson, 'utf-8');
