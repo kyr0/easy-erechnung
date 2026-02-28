@@ -60,9 +60,13 @@ public class Main {
     private static final Map<String, JTextField> recipientFieldsMap = new HashMap<>();
     private static final Map<String, JComponent> invoiceDetailsMap = new LinkedHashMap<>();
     private static final Map<String, JComponent> einstellungenFieldsMap = new LinkedHashMap<>();
+    private static final Map<String, JTextField> meinUnternehmenFieldsMap = new LinkedHashMap<>();
     private static final Map<String, JTextField> summenUndSteuernFieldsMap = new LinkedHashMap<>();
     private static DefaultTableModel positionenTableModel;
     private static String pdfFilePath;
+    /** Last selected invoice mode: "eingang" or "ausgang" */
+    private static String invoiceMode = "eingang";
+    private static JTabbedPane mainTabbedPane;
 
     private static final Map<String, String> UNIT_TRANSLATIONS = Map.of(
             "PCE", "Stück (PCE)",
@@ -167,16 +171,25 @@ public class Main {
         JPanel rahmendatenTab = createRahmendatenTab();
         JPanel positionenTab = createPositionenTab();
         JPanel summenUndSteuernTab = createSummenUndSteuernTab();
+        JPanel meinUnternehmenTab = createMeinUnternehmenTab();
         JPanel einstellungenTab = createEinstellungenTab();
 
-        tabbedPane.addTab("Rahmendaten", rahmendatenTab);
+        tabbedPane.addTab("Basisdaten", rahmendatenTab);
         tabbedPane.addTab("Positionen", positionenTab);
         tabbedPane.addTab("Summen und Steuern", summenUndSteuernTab);
+        tabbedPane.addTab("Mein Unternehmen", meinUnternehmenTab);
         tabbedPane.addTab("Einstellungen", einstellungenTab);
-        tabbedPane.setSelectedIndex(3); // Show Einstellungen tab by default
+
+        // Disable data tabs until processing completes
+        tabbedPane.setEnabledAt(0, false); // Basisdaten
+        tabbedPane.setEnabledAt(1, false); // Positionen
+        tabbedPane.setEnabledAt(2, false); // Summen und Steuern
+        tabbedPane.setSelectedIndex(3); // Show Mein Unternehmen tab by default
 
         loadEinstellungen();
+        loadMeinUnternehmen();
 
+        mainTabbedPane = tabbedPane;
         return tabbedPane;
     }
 
@@ -261,7 +274,7 @@ public class Main {
     private static boolean validateRahmendaten() {
         // Check sender fields
         boolean hasSteuernummer = !senderFieldsMap.get("Steuernummer/Ust-ID").getText().trim().isEmpty();
-        boolean hasUstId = !((JTextField) einstellungenFieldsMap.get("USt-ID")).getText().trim().isEmpty();
+        boolean hasUstId = !meinUnternehmenFieldsMap.get("Steuernummer/USt-ID").getText().trim().isEmpty();
 
         if (!hasSteuernummer && !hasUstId) {
             showError("Entweder Steuernummer oder USt-ID muss angegeben werden.");
@@ -737,18 +750,112 @@ public class Main {
         return field != null ? field.getText() : null;
     }
 
+    private static JPanel createMeinUnternehmenTab() {
+        meinUnternehmenFieldsMap.put("Name", new JTextField(30));
+        meinUnternehmenFieldsMap.put("Straße", new JTextField(20));
+        meinUnternehmenFieldsMap.put("Hausnummer", new JTextField(6));
+        meinUnternehmenFieldsMap.put("PLZ", new JTextField(6));
+        meinUnternehmenFieldsMap.put("Ort", new JTextField(20));
+        meinUnternehmenFieldsMap.put("Land", new JTextField("DE", 30));
+        meinUnternehmenFieldsMap.put("Steuernummer/USt-ID", new JTextField(30));
+
+        loadMeinUnternehmen();
+
+        JPanel panel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = new Insets(5, 10, 5, 10);
+        gbc.weightx = 1.0;
+        gbc.anchor = GridBagConstraints.NORTHWEST;
+
+        int row = 0;
+
+        // Name – full width
+        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.gridwidth = 1;
+        panel.add(new JLabel("Name:"), gbc);
+        gbc.gridx = 1; gbc.weightx = 1.0; gbc.gridwidth = 3;
+        panel.add(meinUnternehmenFieldsMap.get("Name"), gbc);
+        row++;
+
+        // Straße/Hausnummer side by side
+        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.gridwidth = 1;
+        panel.add(new JLabel("Straße/Hausnummer:"), gbc);
+        gbc.gridx = 1; gbc.weightx = 0.7; gbc.gridwidth = 1;
+        panel.add(meinUnternehmenFieldsMap.get("Straße"), gbc);
+        gbc.gridx = 2; gbc.weightx = 0.3; gbc.gridwidth = 2;
+        panel.add(meinUnternehmenFieldsMap.get("Hausnummer"), gbc);
+        row++;
+
+        // PLZ/Ort side by side
+        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.gridwidth = 1;
+        panel.add(new JLabel("PLZ/Ort:"), gbc);
+        gbc.gridx = 1; gbc.weightx = 0.3; gbc.gridwidth = 1;
+        panel.add(meinUnternehmenFieldsMap.get("PLZ"), gbc);
+        gbc.gridx = 2; gbc.weightx = 0.7; gbc.gridwidth = 2;
+        panel.add(meinUnternehmenFieldsMap.get("Ort"), gbc);
+        row++;
+
+        // Land – full width
+        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.gridwidth = 1;
+        panel.add(new JLabel("Land:"), gbc);
+        gbc.gridx = 1; gbc.weightx = 1.0; gbc.gridwidth = 3;
+        panel.add(meinUnternehmenFieldsMap.get("Land"), gbc);
+        row++;
+
+        // Steuernummer/USt-ID – full width
+        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0; gbc.gridwidth = 1;
+        panel.add(new JLabel("Steuernummer/USt-ID:"), gbc);
+        gbc.gridx = 1; gbc.weightx = 1.0; gbc.gridwidth = 3;
+        panel.add(meinUnternehmenFieldsMap.get("Steuernummer/USt-ID"), gbc);
+        row++;
+
+        JButton saveButton = new JButton("Speichern");
+        saveButton.addActionListener(e -> saveMeinUnternehmen());
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.gridwidth = 2;
+        gbc.anchor = GridBagConstraints.CENTER;
+        panel.add(saveButton, gbc);
+
+        gbc.gridy = row + 1;
+        gbc.weighty = 1.0;
+        panel.add(Box.createVerticalGlue(), gbc);
+
+        panel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        return panel;
+    }
+
+    private static void saveMeinUnternehmen() {
+        prefs.put("MU_Name", meinUnternehmenFieldsMap.get("Name").getText());
+        prefs.put("MU_Strasse", meinUnternehmenFieldsMap.get("Straße").getText());
+        prefs.put("MU_Hausnr", meinUnternehmenFieldsMap.get("Hausnummer").getText());
+        prefs.put("MU_PLZ", meinUnternehmenFieldsMap.get("PLZ").getText());
+        prefs.put("MU_Ort", meinUnternehmenFieldsMap.get("Ort").getText());
+        prefs.put("MU_Land", meinUnternehmenFieldsMap.get("Land").getText());
+        prefs.put("MU_StNrUStID", meinUnternehmenFieldsMap.get("Steuernummer/USt-ID").getText());
+        // Migrate legacy prefs for backward compat
+        prefs.put("Steuernummer", meinUnternehmenFieldsMap.get("Steuernummer/USt-ID").getText());
+        loadMeinUnternehmen();
+        JOptionPane.showMessageDialog(null, "Unternehmensdaten gespeichert.", "Speichern", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private static void loadMeinUnternehmen() {
+        meinUnternehmenFieldsMap.get("Name").setText(prefs.get("MU_Name", ""));
+        meinUnternehmenFieldsMap.get("Straße").setText(prefs.get("MU_Strasse", ""));
+        meinUnternehmenFieldsMap.get("Hausnummer").setText(prefs.get("MU_Hausnr", ""));
+        meinUnternehmenFieldsMap.get("PLZ").setText(prefs.get("MU_PLZ", ""));
+        meinUnternehmenFieldsMap.get("Ort").setText(prefs.get("MU_Ort", ""));
+        meinUnternehmenFieldsMap.get("Land").setText(prefs.get("MU_Land", "DE"));
+        meinUnternehmenFieldsMap.get("Steuernummer/USt-ID").setText(
+                prefs.get("MU_StNrUStID", prefs.get("Steuernummer", prefs.get("UStID", ""))));
+    }
+
     private static JPanel createEinstellungenTab() {
         // Initialize the fields
         einstellungenFieldsMap.put("API Key", new JPasswordField(30));
         einstellungenFieldsMap.put("Basis URL", new JTextField(30));
         einstellungenFieldsMap.put("OCR-Modell", new JTextField(30));
         einstellungenFieldsMap.put("JSON Modell", new JTextField(30));
-        einstellungenFieldsMap.put("Steuernummer", new JTextField(30));
-        einstellungenFieldsMap.put("USt-ID", new JTextField(30));
-        JTextArea adresseField = new JTextArea(5, 30);
-        adresseField.setLineWrap(true);
-        adresseField.setWrapStyleWord(true);
-        einstellungenFieldsMap.put("Adresse", new JScrollPane(adresseField));
 
         // Load settings on tab creation
         loadEinstellungen();
@@ -826,10 +933,6 @@ public class Main {
         prefs.put("BaseUrl",    baseUrl);
         prefs.put("OcrModel",   ocrModel);
         prefs.put("ModelRepo",  jsonModel);
-        prefs.put("Steuernummer", ((JTextField) einstellungenFieldsMap.get("Steuernummer")).getText());
-        prefs.put("UStID",      ((JTextField) einstellungenFieldsMap.get("USt-ID")).getText());
-        prefs.put("Adresse",
-                ((JTextArea) ((JScrollPane) einstellungenFieldsMap.get("Adresse")).getViewport().getView()).getText());
 
         // Refresh UI to show applied defaults
         loadEinstellungen();
@@ -841,10 +944,6 @@ public class Main {
         ((JTextField) einstellungenFieldsMap.get("Basis URL")).setText(prefs.get("BaseUrl", "http://localhost:11434"));
         ((JTextField) einstellungenFieldsMap.get("OCR-Modell")).setText(prefs.get("OcrModel", "glm-ocr:q8_0"));
         ((JTextField) einstellungenFieldsMap.get("JSON Modell")).setText(prefs.get("ModelRepo", "qwen3:4b-q8_0"));
-        ((JTextField) einstellungenFieldsMap.get("Steuernummer")).setText(prefs.get("Steuernummer", ""));
-        ((JTextField) einstellungenFieldsMap.get("USt-ID")).setText(prefs.get("UStID", ""));
-        ((JTextArea) ((JScrollPane) einstellungenFieldsMap.get("Adresse")).getViewport().getView())
-                .setText(prefs.get("Adresse", ""));
     }
 
     private static void configureDragAndDrop(JPanel panel, JLabel messageLabel, JFrame frame, JLabel statusBar,
@@ -985,8 +1084,13 @@ public class Main {
         String ocrScriptPath = currentPath + File.separator + "src" + File.separator + "ocr.ts";
         String bun = resolveBunExecutable();
 
-        String sellerTaxNo = prefs.get("Steuernummer", prefs.get("UStID", ""));
-        String sellerAddress = prefs.get("Adresse", "");
+        String myName = prefs.get("MU_Name", "");
+        String myStreet = prefs.get("MU_Strasse", "");
+        String myHausnr = prefs.get("MU_Hausnr", "");
+        String myPlz = prefs.get("MU_PLZ", "");
+        String myOrt = prefs.get("MU_Ort", "");
+        String myLand = prefs.get("MU_Land", "DE");
+        String myTaxId = prefs.get("MU_StNrUStID", prefs.get("Steuernummer", prefs.get("UStID", "")));
         String baseUrl = prefs.get("BaseUrl", "");
         String apiKey = prefs.get("ApiKey", prefs.get("OpenAIKey", ""));
         String ocrModel = prefs.get("OcrModel", "");
@@ -1011,8 +1115,14 @@ public class Main {
                 bun, "run", ocrScriptPath,
                 "--input",          pdfFilePath,
                 "--output",         outputJsonPath,
-                "--seller-address", sellerAddress,
-                "--seller-tax-no",  sellerTaxNo,
+                "--mode",           invoiceMode,
+                "--my-name",        myName,
+                "--my-street",      myStreet,
+                "--my-hausnr",      myHausnr,
+                "--my-plz",         myPlz,
+                "--my-ort",         myOrt,
+                "--my-land",        myLand,
+                "--my-tax-id",      myTaxId,
                 "--base-url",       baseUrl,
                 "--api-key",        apiKey,
                 "--ocr-model",      ocrModel,
@@ -1068,9 +1178,9 @@ public class Main {
         String aiJsonPath = generateJsonFilePath(file.getAbsolutePath(), "ai");
         File cacheFile = new File(aiJsonPath);
 
-        if (cacheFile.exists() && cacheFile.length() > 0) {
-            System.out.println("AI cache found. Skipping pipeline execution.");
-            return aiJsonPath;
+        // Always re-run: mode (eingang/ausgang) may differ between runs
+        if (cacheFile.exists()) {
+            cacheFile.delete();
         }
 
         try {
@@ -1631,10 +1741,16 @@ public class Main {
                         process.destroyForcibly();
                     }
 
-                    // Restore the original right component
+                    // Restore the original right component and enable data tabs
                     SwingUtilities.invokeLater(() -> {
                         splitPane.setRightComponent(originalRightComponent);
                         splitPane.setDividerLocation(640);
+                        if (mainTabbedPane != null) {
+                            mainTabbedPane.setEnabledAt(0, true); // Basisdaten
+                            mainTabbedPane.setEnabledAt(1, true); // Positionen
+                            mainTabbedPane.setEnabledAt(2, true); // Summen und Steuern
+                            mainTabbedPane.setSelectedIndex(0);   // Switch to Basisdaten
+                        }
                         splitPane.revalidate();
                         splitPane.repaint();
                     });
@@ -1677,6 +1793,20 @@ public class Main {
                     } else if (statusBar != null) {
                         statusBar.setText(FILE_ACCEPTED_MSG + file.getName());
                     }
+
+                    // Ask user for invoice mode before processing
+                    int choice = JOptionPane.showOptionDialog(
+                            frame,
+                            "Modus:",
+                            "Rechnungsmodus",
+                            JOptionPane.DEFAULT_OPTION,
+                            JOptionPane.QUESTION_MESSAGE,
+                            null,
+                            new String[]{"Eingang", "Ausgang"},
+                            "Eingang");
+                    if (choice == JOptionPane.CLOSED_OPTION) return; // user cancelled
+                    invoiceMode = choice == 0 ? "eingang" : "ausgang";
+
                     processPDF(file, statusBar, frame, splitPane);
 
                 } else {

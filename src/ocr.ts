@@ -258,30 +258,62 @@ class LLMClient {
   /**
    * Sends the OCR markdown to the JSON model and returns the extracted invoice JSON string.
    */
-  async convertMarkdownToJson(markdown: string, sellerAddress: string, sellerTaxNo: string): Promise<string> {
+  async convertMarkdownToJson(
+    markdown: string,
+    mode: 'eingang' | 'ausgang',
+    myCompany: { name: string; street: string; hausnr: string; plz: string; ort: string; land: string; taxId: string },
+  ): Promise<string> {
+
+    // Build the street line: combine street + hausnr if both present
+    const streetLine = [myCompany.street, myCompany.hausnr].filter(Boolean).join(' ');
+
+    // Build the "known company" block that's injected depending on mode
+    const myBlock = [
+      myCompany.name,
+      streetLine,
+      [myCompany.plz, myCompany.ort].filter(Boolean).join(' '),
+      myCompany.land,
+      `Steuernummer/USt-ID: ${myCompany.taxId}`,
+    ].filter(Boolean).join('\n');
+
+    // Eingang: user is the Buyer; Ausgang: user is the Seller
+    const fixedRole = mode === 'eingang' ? 'Buyer' : 'Seller';
+    const extractRole = mode === 'eingang' ? 'Seller' : 'Buyer';
+    const fixedLabel = mode === 'eingang' ? 'Rechnung an (Empfänger)' : 'Rechnung von (Absender)';
+    const extractLabel = mode === 'eingang' ? 'Rechnung von (Absender)' : 'Rechnung an (Empfänger)';
+
+    const forbiddenFields = mode === 'ausgang'
+      ? `- The ${extractRole} fields and PaymentReceiver must NEVER contain any of the known company values listed above. If the OCR text is ambiguous, leave those fields empty.`
+      : `- The ${extractRole} fields must NEVER contain any of the known company values listed above. If the OCR text is ambiguous, leave those fields empty.`;
+
     const systemMessage = `You are an expert OCR data analyst and accountant.
 Your task: extract invoice data from OCR'd text and output a single JSON object matching the ZUGFeRD invoice format.
 
 The OCR text may come from multiple pages of the same invoice, separated by "--- PAGE N ---" markers.
 You must semantically merge all pages into ONE unified invoice. Different pages may contain different parts of the same invoice (e.g. page 1 has line items, page 2 has payment details/IBAN).
 
+MODE: ${mode.toUpperCase()} — the user's own company is the ${fixedRole} (${fixedLabel}).
+
+Known company data (ALWAYS use these for the ${fixedRole} section):
+${myBlock}
+
 Fundamental rules:
+- The ${fixedRole} section MUST use EXACTLY the known company data above. Do NOT extract ${fixedRole} data from the document.
+- The ${extractRole} (${extractLabel}) must be extracted from the OCR document text.
+${forbiddenFields}
 - Extract data ONLY from the OCR'd document text below. Do NOT invent or hallucinate values.
 - If a field cannot be found in any page, leave it as an empty string "" or 0.0 for numbers.
-- The "Seller" hints (address, tax number) are provided by the user as metadata for the ZUGFeRD output. Extract the actual seller name from the document.
-- The "Buyer" is the recipient/addressee of the invoice — the person or company the invoice is sent TO. On German invoices the buyer's name and address appear in the address window block below the sender line (e.g. "Usegroup Inh. Jochen Stärk / Huswertstr. 14 / 60435 Frankfurt"). Extract the buyer Name, StreetName, City, and PostalCode from this block.
-- TaxIdentificationNumber fields must contain ONLY a valid USt-IdNr (e.g. "DE123456789") or Steuernummer (e.g. "147/214/00001"). Customer numbers ("K0100077603"), mandate references, or other IDs are NOT tax IDs — leave the field as "" if no valid tax ID is found.
+- TaxIdentificationNumber fields must contain ONLY a valid USt-IdNr (e.g. "DE123456789") or Steuernummer (e.g. "147/214/00001"). Customer numbers, mandate references, or other IDs are NOT tax IDs — leave the field as "" if no valid tax ID is found.
 - InvoiceNumber: look for patterns like "Invoice #", "Rechnungsnummer:", "RE-", "INV-" near the top of the document. Do NOT use LineID values as InvoiceNumber.
 - LineID values ("1", "2", "3") are position numbers in the InvoiceLines array, NOT the InvoiceNumber.
 - IBAN, BIC, and BankName usually appear at the very top or very bottom of a page. Look in headers/footers across all pages.
-- When a line item description contains a date range, the unit is DAY and the quantity is the number of days in that range. The preprocessed text may include a "DAYS: N" annotation — use that value as the Quantity.
+- NEVER calculate or assume prices, quantities, or totals. Always use the exact numbers written in the document.
+- Unit detection for line items: Use DAY as the unit ONLY if BOTH conditions are met: (1) the line item description contains a date range, AND (2) the quantity value for that position exactly matches the number of days in that date range. If the quantity is larger than the day count, the unit is likely HUR (hours), not DAY. The preprocessed text may include a "DAYS: N" annotation for reference.
 - Combine line items from ALL pages into one InvoiceLines array. Do NOT duplicate items that appear on multiple pages.
+- PaymentReference: ONLY extract an actual payment reference/Verwendungszweck if one is explicitly stated in the document (a distinct number or code). Do NOT copy the invoice number or any other field. If no explicit payment reference is found, set it to "".
 - Return ONLY the raw JSON object. No markdown, no code fences, no explanation.`;
 
-    const userMessage = `Seller address hint (for Seller section): ${sellerAddress}
-Seller Tax ID hint (for Seller.TaxIdentificationNumber): ${sellerTaxNo}
-
-OCR'd invoice text:
+    const userMessage = `OCR'd invoice text:
 ${markdown}
 
 IMPORTANT unit codes:
@@ -298,27 +330,27 @@ Return ONLY valid JSON matching exactly this structure:
     "InvoiceDate": "YYYY-MM-DD",
     "DueDate": "YYYY-MM-DD",
     "Seller": {
-      "Name": "<seller company name>",
-      "StreetName": "<street from seller address hint>",
-      "City": "<city from seller address hint>",
-      "PostalCode": "<postal code from seller address hint>",
-      "CountryCode": "DE",
-      "TaxIdentificationNumber": "<from seller tax ID hint>"
+      "Name": "${mode === 'ausgang' ? myCompany.name : '<from document>'}",
+      "StreetName": "${mode === 'ausgang' ? streetLine : '<from document>'}",
+      "City": "${mode === 'ausgang' ? myCompany.ort : '<from document>'}",
+      "PostalCode": "${mode === 'ausgang' ? myCompany.plz : '<from document>'}",
+      "CountryCode": "${mode === 'ausgang' ? myCompany.land : 'DE'}",
+      "TaxIdentificationNumber": "${mode === 'ausgang' ? myCompany.taxId : '<from document or empty>'}"
     },
     "Buyer": {
-      "Name": "<buyer name>",
-      "StreetName": "<buyer street>",
-      "City": "<buyer city>",
-      "PostalCode": "<buyer postal code>",
-      "CountryCode": "DE",
-      "TaxIdentificationNumber": "<buyer tax ID>"
+      "Name": "${mode === 'eingang' ? myCompany.name : '<from document>'}",
+      "StreetName": "${mode === 'eingang' ? streetLine : '<from document>'}",
+      "City": "${mode === 'eingang' ? myCompany.ort : '<from document>'}",
+      "PostalCode": "${mode === 'eingang' ? myCompany.plz : '<from document>'}",
+      "CountryCode": "${mode === 'eingang' ? myCompany.land : 'DE'}",
+      "TaxIdentificationNumber": "${mode === 'eingang' ? myCompany.taxId : '<from document or empty>'}"
     },
     "DocumentCurrencyCode": "EUR",
     "IBAN": "<IBAN>",
     "BIC": "<BIC>",
     "BankName": "<bank name>",
     "PaymentReceiver": "<payment receiver name>",
-    "PaymentReference": "<payment reference>",
+    "PaymentReference": "<ONLY if explicitly stated, otherwise empty string>",
     "Tax": {
       "TaxTypeCode": "VAT",
       "TaxCategoryCode": "S",
@@ -389,10 +421,7 @@ Return ONLY valid JSON matching exactly this structure:
     const content = data.message?.content;
     if (!content) throw new Error(`JSON-Modell (${this.jsonModel}) lieferte eine leere Antwort`);
 
-    return content.trim()
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```\s*$/, '')
-      .trim();
+    return extractJson(content);
   }
 
   /** OpenAI-compatible /v1/chat/completions for remote endpoints */
@@ -413,6 +442,7 @@ Return ONLY valid JSON matching exactly this structure:
         ],
         stream: false,
         temperature: 0,
+        response_format: { type: 'json_object' },
         options: { num_ctx: 10240 },
       }),
     });
@@ -428,11 +458,54 @@ Return ONLY valid JSON matching exactly this structure:
     const content = data.choices?.[0]?.message?.content;
     if (!content) throw new Error(`JSON-Modell (${this.jsonModel}) lieferte eine leere Antwort`);
 
-    return content.trim()
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```\s*$/, '')
-      .trim();
+    return extractJson(content);
   }
+}
+
+/**
+ * Extract a JSON object from LLM output that may contain thinking tokens,
+ * markdown fences, or preamble/trailing text.
+ */
+function extractJson(raw: string): string {
+  let text = raw.trim();
+
+  // Strip <think>...</think> blocks (qwen3 extended thinking)
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // Strip markdown code fences
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+
+  // Try parsing directly first
+  try {
+    JSON.parse(text);
+    return text;
+  } catch { /* continue with extraction */ }
+
+  // Find the first '{' and match it to its closing '}'
+  const start = text.indexOf('{');
+  if (start !== -1) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\' && inString) { escaped = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = text.substring(start, i + 1);
+          JSON.parse(candidate); // validate — throws if invalid
+          return candidate;
+        }
+      }
+    }
+  }
+
+  throw new Error('LLM-Antwort enthält kein gültiges JSON-Objekt');
 }
 
 // ── Markdown preprocessing ────────────────────────────────────────────────────
@@ -536,8 +609,14 @@ async function resizeImageToMaxMP(inputPath: string, outputPath: string, maxMP =
 interface ParsedArgs {
   input: string;
   output: string;
-  sellerAddress: string;
-  sellerTaxNo: string;
+  mode: 'eingang' | 'ausgang';
+  myName: string;
+  myStreet: string;
+  myHausnr: string;
+  myPlz: string;
+  myOrt: string;
+  myLand: string;
+  myTaxId: string;
   baseUrl: string;
   apiKey: string;
   ocrModel: string;
@@ -549,8 +628,14 @@ function parseArgs(): ParsedArgs {
   const result: ParsedArgs = {
     input: '',
     output: '',
-    sellerAddress: '',
-    sellerTaxNo: '',
+    mode: 'eingang',
+    myName: '',
+    myStreet: '',
+    myHausnr: '',
+    myPlz: '',
+    myOrt: '',
+    myLand: 'DE',
+    myTaxId: '',
     // Env-var defaults — CLI flags override these
     baseUrl:   process.env.LLM_BASE_URL  ?? 'http://localhost:11434',
     apiKey:    process.env.LLM_API_KEY   ?? '',
@@ -562,18 +647,30 @@ function parseArgs(): ParsedArgs {
     switch (argv[i]) {
       case '--input':          result.input         = argv[++i]; break;
       case '--output':         result.output        = argv[++i]; break;
-      case '--seller-address': result.sellerAddress = argv[++i]; break;
-      case '--seller-tax-no':  result.sellerTaxNo   = argv[++i]; break;
+      case '--mode':           result.mode          = argv[++i] as 'eingang' | 'ausgang'; break;
+      case '--my-name':        result.myName        = argv[++i]; break;
+      case '--my-street':      result.myStreet      = argv[++i]; break;
+      case '--my-hausnr':      result.myHausnr      = argv[++i]; break;
+      case '--my-plz':         result.myPlz         = argv[++i]; break;
+      case '--my-ort':         result.myOrt         = argv[++i]; break;
+      case '--my-land':        result.myLand         = argv[++i]; break;
+      // Legacy args — silently ignore
+      case '--my-plz-ort':     i++; break;
+      case '--my-tax-id':      result.myTaxId       = argv[++i]; break;
       case '--base-url':       result.baseUrl       = argv[++i]; break;
       case '--api-key':        result.apiKey        = argv[++i]; break;
       case '--ocr-model':      result.ocrModel      = argv[++i]; break;
       case '--json-model':     result.jsonModel     = argv[++i]; break;
+      // Legacy args — silently ignore
+      case '--seller-address': i++; break;
+      case '--seller-tax-no':  i++; break;
     }
   }
 
   if (!result.input) {
-    console.error('Verwendung: ocr --input <Datei> [--output <Datei>]');
-    console.error('               [--seller-address <Adresse>] [--seller-tax-no <StNr>]');
+    console.error('Verwendung: ocr --input <Datei> [--output <Datei>] [--mode eingang|ausgang]');
+    console.error('               [--my-name <Name>] [--my-street <Straße>] [--my-hausnr <Nr>]');
+    console.error('               [--my-plz <PLZ>] [--my-ort <Ort>] [--my-land <Land>] [--my-tax-id <StNr/UStID>]');
     console.error('               [--base-url <URL>] [--api-key <Schlüssel>]');
     console.error('               [--ocr-model <Modell>] [--json-model <Modell>]');
     console.error('');
@@ -588,7 +685,17 @@ function parseArgs(): ParsedArgs {
 
 async function main() {
   const args = parseArgs();
-  const { input, output, sellerAddress, sellerTaxNo, ocrModel, jsonModel, baseUrl: rawBaseUrl } = args;
+  const { input, output, mode, ocrModel, jsonModel, baseUrl: rawBaseUrl } = args;
+
+  const myCompany = {
+    name: args.myName,
+    street: args.myStreet,
+    hausnr: args.myHausnr,
+    plz: args.myPlz,
+    ort: args.myOrt,
+    land: args.myLand,
+    taxId: args.myTaxId,
+  };
 
   // Normalize base URL: strip trailing /v1 so we can always append paths ourselves
   const baseUrl = rawBaseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '');
@@ -618,7 +725,7 @@ async function main() {
   await llm.ensureModelReady(jsonModel);
 
   const fileType = await detectFileType(input);
-  const tempDir = join(__dirname, '.tmp_' + createHash('md5').update(input + Date.now()).digest('hex'));
+  const tempDir = join(__dirname, `.tmp_${createHash('md5').update(input + Date.now()).digest('hex')}`);
 
   try {
     mkdirSync(tempDir, { recursive: true });
@@ -692,18 +799,21 @@ async function main() {
     const preprocessedMarkdown = preprocessMarkdownDates(combinedMarkdown);
 
     const jsonT0 = Date.now();
-    const invoiceJson = await llm.convertMarkdownToJson(preprocessedMarkdown, sellerAddress, sellerTaxNo);
+    const invoiceJson = await llm.convertMarkdownToJson(preprocessedMarkdown, mode, myCompany);
     console.log(`[JSON] Extraktion abgeschlossen in ${((Date.now() - jsonT0) / 1000).toFixed(1)}s`);
 
     // Parse to validate and pretty-print
-    let finalJson: string;
-    try {
-      const parsed = JSON.parse(invoiceJson);
-      finalJson = JSON.stringify(parsed, null, 2);
-    } catch {
-      // If not valid JSON, use raw output — let downstream handle the error
-      finalJson = invoiceJson;
+    const parsed = JSON.parse(invoiceJson);
+
+    // If PaymentReference is empty, copy InvoiceNumber there
+    if (parsed.Invoice) {
+      const inv = parsed.Invoice;
+      if (!inv.PaymentReference && inv.InvoiceNumber) {
+        inv.PaymentReference = inv.InvoiceNumber;
+      }
     }
+
+    const finalJson = JSON.stringify(parsed, null, 2);
 
     if (output) {
       writeFileSync(output, finalJson, 'utf-8');
