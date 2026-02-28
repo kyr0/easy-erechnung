@@ -46,8 +46,8 @@ class LLMClient {
   constructor(
     public readonly baseUrl: string,
     public readonly apiKey: string,
-    public readonly ocrModel: string,
-    public readonly jsonModel: string,
+    public readonly model: string,
+    public readonly reasoning: boolean,
   ) {}
 
   private isLocalhost(): boolean {
@@ -192,7 +192,7 @@ class LLMClient {
       signal: AbortSignal.timeout(5 * 60_000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: this.ocrModel,
+        model: this.model,
         messages: [
           {
             role: 'user',
@@ -201,6 +201,7 @@ class LLMClient {
           },
         ],
         stream: false,
+        ...(this.reasoning && { options: { num_ctx: 16384 } }),
       }),
     });
 
@@ -224,7 +225,7 @@ class LLMClient {
       signal: AbortSignal.timeout(5 * 60_000),
       headers: this.authHeaders(),
       body: JSON.stringify({
-        model: this.ocrModel,
+        model: this.model,
         messages: [
           {
             role: 'user',
@@ -241,6 +242,7 @@ class LLMClient {
           },
         ],
         stream: false,
+        ...(this.reasoning && { reasoning_effort: 'high' }),
       }),
     });
 
@@ -388,7 +390,7 @@ Return ONLY valid JSON matching exactly this structure:
   private async convertMarkdownViaOllama(systemMessage: string, userMessage: string): Promise<string> {
     const url = `${this.baseUrl}/api/chat`;
     const payload = {
-      model: this.jsonModel,
+      model: this.model,
       messages: [
         { role: 'system', content: systemMessage },
         { role: 'user', content: userMessage },
@@ -400,7 +402,7 @@ Return ONLY valid JSON matching exactly this structure:
       options: { temperature: 0, num_ctx: 10240 },
     };
 
-    console.log(`[JSON] Sende an LLM (Modell: ${this.jsonModel})...`);
+    console.log(`[JSON] Sende an LLM (Modell: ${this.model})...`);
     const t0 = Date.now();
 
     const response = await fetch(url, {
@@ -419,7 +421,7 @@ Return ONLY valid JSON matching exactly this structure:
 
     const data = await response.json() as { message?: { content?: string } };
     const content = data.message?.content;
-    if (!content) throw new Error(`JSON-Modell (${this.jsonModel}) lieferte eine leere Antwort`);
+    if (!content) throw new Error(`JSON-Modell (${this.model}) lieferte eine leere Antwort`);
 
     return extractJson(content);
   }
@@ -427,7 +429,7 @@ Return ONLY valid JSON matching exactly this structure:
   /** OpenAI-compatible /v1/chat/completions for remote endpoints */
   private async convertMarkdownViaOpenAI(systemMessage: string, userMessage: string): Promise<string> {
     const url = `${this.baseUrl}/v1/chat/completions`;
-    console.log(`[JSON] Sende an LLM (Modell: ${this.jsonModel})...`);
+    console.log(`[JSON] Sende an LLM (Modell: ${this.model})...`);
     const t0 = Date.now();
 
     const response = await fetch(url, {
@@ -435,7 +437,7 @@ Return ONLY valid JSON matching exactly this structure:
       signal: AbortSignal.timeout(5 * 60_000),
       headers: this.authHeaders(),
       body: JSON.stringify({
-        model: this.jsonModel,
+        model: this.model,
         messages: [
           { role: 'system', content: systemMessage },
           { role: 'user', content: userMessage },
@@ -443,7 +445,7 @@ Return ONLY valid JSON matching exactly this structure:
         stream: false,
         temperature: 0,
         response_format: { type: 'json_object' },
-        options: { num_ctx: 10240 },
+        ...(this.reasoning ? { reasoning_effort: 'high' } : { options: { num_ctx: 10240 } }),
       }),
     });
 
@@ -456,7 +458,7 @@ Return ONLY valid JSON matching exactly this structure:
 
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new Error(`JSON-Modell (${this.jsonModel}) lieferte eine leere Antwort`);
+    if (!content) throw new Error(`JSON-Modell (${this.model}) lieferte eine leere Antwort`);
 
     return extractJson(content);
   }
@@ -617,10 +619,16 @@ interface ParsedArgs {
   myOrt: string;
   myLand: string;
   myTaxId: string;
-  baseUrl: string;
-  apiKey: string;
-  ocrModel: string;
+  // JSON Modell settings
+  jsonBaseUrl: string;
+  jsonApiKey: string;
   jsonModel: string;
+  jsonReasoning: boolean;
+  // OCR Modell settings
+  ocrBaseUrl: string;
+  ocrApiKey: string;
+  ocrModel: string;
+  ocrReasoning: boolean;
 }
 
 function parseArgs(): ParsedArgs {
@@ -636,11 +644,16 @@ function parseArgs(): ParsedArgs {
     myOrt: '',
     myLand: 'DE',
     myTaxId: '',
-    // Env-var defaults — CLI flags override these
-    baseUrl:   process.env.LLM_BASE_URL  ?? 'http://localhost:11434',
-    apiKey:    process.env.LLM_API_KEY   ?? '',
-    ocrModel:  process.env.OCR_MODEL     ?? 'glm-ocr:q8_0',
-    jsonModel: process.env.JSON_MODEL    ?? 'qwen3:4b-q8_0',
+    // JSON Modell defaults
+    jsonBaseUrl:   process.env.JSON_BASE_URL  ?? 'http://localhost:11434',
+    jsonApiKey:    process.env.JSON_API_KEY   ?? '',
+    jsonModel:     process.env.JSON_MODEL     ?? 'qwen3:4b-q8_0',
+    jsonReasoning: process.env.JSON_REASONING === 'true',
+    // OCR Modell defaults
+    ocrBaseUrl:    process.env.OCR_BASE_URL   ?? 'http://localhost:11434',
+    ocrApiKey:     process.env.OCR_API_KEY    ?? '',
+    ocrModel:      process.env.OCR_MODEL      ?? 'glm-ocr:q8_0',
+    ocrReasoning:  process.env.OCR_REASONING  === 'true',
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -654,14 +667,20 @@ function parseArgs(): ParsedArgs {
       case '--my-plz':         result.myPlz         = argv[++i]; break;
       case '--my-ort':         result.myOrt         = argv[++i]; break;
       case '--my-land':        result.myLand         = argv[++i]; break;
-      // Legacy args — silently ignore
-      case '--my-plz-ort':     i++; break;
       case '--my-tax-id':      result.myTaxId       = argv[++i]; break;
-      case '--base-url':       result.baseUrl       = argv[++i]; break;
-      case '--api-key':        result.apiKey        = argv[++i]; break;
-      case '--ocr-model':      result.ocrModel      = argv[++i]; break;
+      // JSON Modell settings
+      case '--json-base-url':  result.jsonBaseUrl   = argv[++i]; break;
+      case '--json-api-key':   result.jsonApiKey    = argv[++i]; break;
       case '--json-model':     result.jsonModel     = argv[++i]; break;
+      case '--json-reasoning': result.jsonReasoning = argv[++i] === 'true'; break;
+      // OCR Modell settings
+      case '--ocr-base-url':   result.ocrBaseUrl    = argv[++i]; break;
+      case '--ocr-api-key':    result.ocrApiKey     = argv[++i]; break;
+      case '--ocr-model':      result.ocrModel      = argv[++i]; break;
+      case '--ocr-reasoning':  result.ocrReasoning  = argv[++i] === 'true'; break;
       // Legacy args — silently ignore
+      case '--base-url':       i++; break;
+      case '--api-key':        i++; break;
       case '--seller-address': i++; break;
       case '--seller-tax-no':  i++; break;
     }
@@ -671,10 +690,11 @@ function parseArgs(): ParsedArgs {
     console.error('Verwendung: ocr --input <Datei> [--output <Datei>] [--mode eingang|ausgang]');
     console.error('               [--my-name <Name>] [--my-street <Straße>] [--my-hausnr <Nr>]');
     console.error('               [--my-plz <PLZ>] [--my-ort <Ort>] [--my-land <Land>] [--my-tax-id <StNr/UStID>]');
-    console.error('               [--base-url <URL>] [--api-key <Schlüssel>]');
-    console.error('               [--ocr-model <Modell>] [--json-model <Modell>]');
+    console.error('               [--json-base-url <URL>] [--json-api-key <Schlüssel>] [--json-model <Modell>] [--json-reasoning <true|false>]');
+    console.error('               [--ocr-base-url <URL>] [--ocr-api-key <Schlüssel>] [--ocr-model <Modell>] [--ocr-reasoning <true|false>]');
     console.error('');
-    console.error('Umgebungsvariablen (CLI überschreibt): LLM_BASE_URL  LLM_API_KEY  OCR_MODEL  JSON_MODEL');
+    console.error('Umgebungsvariablen: JSON_BASE_URL  JSON_API_KEY  JSON_MODEL  JSON_REASONING');
+    console.error('                    OCR_BASE_URL   OCR_API_KEY   OCR_MODEL   OCR_REASONING');
     process.exit(1);
   }
 
@@ -685,7 +705,7 @@ function parseArgs(): ParsedArgs {
 
 async function main() {
   const args = parseArgs();
-  const { input, output, mode, ocrModel, jsonModel, baseUrl: rawBaseUrl } = args;
+  const { input, output, mode } = args;
 
   const myCompany = {
     name: args.myName,
@@ -697,32 +717,51 @@ async function main() {
     taxId: args.myTaxId,
   };
 
-  // Normalize base URL: strip trailing /v1 so we can always append paths ourselves
-  const baseUrl = rawBaseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '');
+  // Normalize base URLs: strip trailing /v1 so we can always append paths ourselves
+  const jsonBaseUrl = args.jsonBaseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '');
+  const ocrBaseUrl = args.ocrBaseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '');
 
-  // Default empty apiKey to 'no-key' for localhost — Ollama doesn't need one,
+  // Default empty apiKeys to 'no-key' for localhost — Ollama doesn't need one,
   // but an empty string can cause issues with /v1 compat endpoints.
-  let apiKey = args.apiKey;
-  if (!apiKey && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/)/.test(baseUrl)) {
-    apiKey = 'no-key';
+  let jsonApiKey = args.jsonApiKey;
+  if (!jsonApiKey && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/)/.test(jsonBaseUrl)) {
+    jsonApiKey = 'no-key';
   }
 
-  const llm = new LLMClient(baseUrl, apiKey, ocrModel, jsonModel);
+  let ocrApiKey = args.ocrApiKey;
+  if (!ocrApiKey && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/)/.test(ocrBaseUrl)) {
+    ocrApiKey = 'no-key';
+  }
 
-  console.log(`LLM-Endpunkt : ${baseUrl}`);
-  console.log(`API-Schlüssel: ${apiKey ? '(gesetzt)' : '(leer)'}`);
-  console.log(`OCR-Modell   : ${ocrModel}`);
-  console.log(`JSON-Modell  : ${jsonModel}`);
+  console.log('=== JSON Modell Konfiguration ===');
+  console.log(`LLM-Endpunkt : ${jsonBaseUrl}`);
+  console.log(`API-Schlüssel: ${jsonApiKey ? '(gesetzt)' : '(leer)'}`);
+  console.log(`Modell       : ${args.jsonModel}`);
+  console.log(`Reasoning    : ${args.jsonReasoning ? 'aktiviert' : 'deaktiviert'}`);
   console.log('');
 
-  console.log('Prüfe ob LLM-Server erreichbar ist...');
-  await llm.ensureServerRunning();
+  console.log('=== OCR Modell Konfiguration ===');
+  console.log(`LLM-Endpunkt : ${ocrBaseUrl}`);
+  console.log(`API-Schlüssel: ${ocrApiKey ? '(gesetzt)' : '(leer)'}`);
+  console.log(`Modell       : ${args.ocrModel}`);
+  console.log(`Reasoning    : ${args.ocrReasoning ? 'aktiviert' : 'deaktiviert'}`);
+  console.log('');
 
-  console.log(`Prüfe ob OCR-Modell "${ocrModel}" verfügbar ist...`);
-  await llm.ensureModelReady(ocrModel);
+  // Create separate LLM clients for JSON and OCR models
+  const jsonLlm = new LLMClient(jsonBaseUrl, jsonApiKey, args.jsonModel, args.jsonReasoning);
+  const ocrLlm = new LLMClient(ocrBaseUrl, ocrApiKey, args.ocrModel, args.ocrReasoning);
 
-  console.log(`Prüfe ob JSON-Modell "${jsonModel}" verfügbar ist...`);
-  await llm.ensureModelReady(jsonModel);
+  console.log('Prüfe ob JSON LLM-Server erreichbar ist...');
+  await jsonLlm.ensureServerRunning();
+
+  console.log('Prüfe ob OCR LLM-Server erreichbar ist...');
+  await ocrLlm.ensureServerRunning();
+
+  console.log(`Prüfe ob OCR-Modell "${args.ocrModel}" verfügbar ist...`);
+  await ocrLlm.ensureModelReady(args.ocrModel);
+
+  console.log(`Prüfe ob JSON-Modell "${args.jsonModel}" verfügbar ist...`);
+  await jsonLlm.ensureModelReady(args.jsonModel);
 
   const fileType = await detectFileType(input);
   const tempDir = join(__dirname, `.tmp_${createHash('md5').update(input + Date.now()).digest('hex')}`);
@@ -757,9 +796,9 @@ async function main() {
       }
 
       try {
-        console.log(`[PAGE ${pageNum}] Starte OCR (Modell: ${ocrModel})...`);
+        console.log(`[PAGE ${pageNum}] Starte OCR (Modell: ${args.ocrModel})...`);
         const ocrT0 = Date.now();
-        const markdown = await llm.runOCR(resizedPath);
+        const markdown = await ocrLlm.runOCR(resizedPath);
         console.log(`[PAGE ${pageNum}] OCR abgeschlossen in ${((Date.now() - ocrT0) / 1000).toFixed(1)}s`);
         console.error(`[OCR markdown page ${pageNum}]\n${markdown}\n[/OCR markdown]`);
 
@@ -788,7 +827,7 @@ async function main() {
 
     // Combine all page markdowns into a single document for one LLM call
     console.log(`\n════════════════════════════════════════`);
-    console.log(`[JSON] Extrahiere Rechnungsdaten aus ${successPages.length} Seite(n) (Modell: ${jsonModel})...`);
+    console.log(`[JSON] Extrahiere Rechnungsdaten aus ${successPages.length} Seite(n) (Modell: ${args.jsonModel})...`);
     console.log(`════════════════════════════════════════`);
 
     const combinedMarkdown = successPages
@@ -799,7 +838,7 @@ async function main() {
     const preprocessedMarkdown = preprocessMarkdownDates(combinedMarkdown);
 
     const jsonT0 = Date.now();
-    const invoiceJson = await llm.convertMarkdownToJson(preprocessedMarkdown, mode, myCompany);
+    const invoiceJson = await jsonLlm.convertMarkdownToJson(preprocessedMarkdown, mode, myCompany);
     console.log(`[JSON] Extraktion abgeschlossen in ${((Date.now() - jsonT0) / 1000).toFixed(1)}s`);
 
     // Parse to validate and pretty-print

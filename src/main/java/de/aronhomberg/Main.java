@@ -59,7 +59,8 @@ public class Main {
     private static final Map<String, JTextField> senderFieldsMap = new HashMap<>();
     private static final Map<String, JTextField> recipientFieldsMap = new HashMap<>();
     private static final Map<String, JComponent> invoiceDetailsMap = new LinkedHashMap<>();
-    private static final Map<String, JComponent> einstellungenFieldsMap = new LinkedHashMap<>();
+    private static final Map<String, JComponent> jsonModellSettingsMap = new LinkedHashMap<>();
+    private static final Map<String, JComponent> ocrModellSettingsMap = new LinkedHashMap<>();
     private static final Map<String, JTextField> meinUnternehmenFieldsMap = new LinkedHashMap<>();
     private static final Map<String, JTextField> summenUndSteuernFieldsMap = new LinkedHashMap<>();
     private static DefaultTableModel positionenTableModel;
@@ -851,17 +852,21 @@ public class Main {
     }
 
     private static JPanel createEinstellungenTab() {
-        // Initialize the fields
-        einstellungenFieldsMap.put("API Key", new JPasswordField(30));
-        einstellungenFieldsMap.put("Basis URL", new JTextField(30));
-        einstellungenFieldsMap.put("OCR-Modell", new JTextField(30));
-        einstellungenFieldsMap.put("JSON Modell", new JTextField(30));
+        // Initialize JSON Modell settings
+        jsonModellSettingsMap.put("API Key", new JPasswordField(25));
+        jsonModellSettingsMap.put("Basis URL", new JTextField(25));
+        jsonModellSettingsMap.put("Modell Name", new JTextField(25));
+        jsonModellSettingsMap.put("Reasoning Enabled", new JCheckBox());
 
-        // Load settings on tab creation
+        // Initialize OCR Modell settings
+        ocrModellSettingsMap.put("API Key", new JPasswordField(25));
+        ocrModellSettingsMap.put("Basis URL", new JTextField(25));
+        ocrModellSettingsMap.put("Modell Name", new JTextField(25));
+        ocrModellSettingsMap.put("Reasoning Enabled", new JCheckBox());
+
         loadEinstellungen();
 
-        // Create main panel with GridBagLayout
-        JPanel einstellungenTab = new JPanel(new GridBagLayout());
+        JPanel mainPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.insets = new Insets(5, 10, 5, 10);
@@ -869,81 +874,120 @@ public class Main {
         gbc.anchor = GridBagConstraints.NORTHWEST;
 
         int row = 0;
-        for (Map.Entry<String, JComponent> entry : einstellungenFieldsMap.entrySet()) {
-            boolean isMultiLine = entry.getValue() instanceof JScrollPane;
 
-            // Add Label
-            gbc.gridx = 0;
-            gbc.gridy = row;
-            gbc.weightx = 0;
-            gbc.weighty = 0;
-            gbc.fill = GridBagConstraints.HORIZONTAL;
-            if (isMultiLine) {
-                gbc.anchor = GridBagConstraints.NORTHWEST;
-            }
-            einstellungenTab.add(new JLabel(entry.getKey() + ":"), gbc);
+        // JSON Modell Panel
+        gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2; gbc.weightx = 1.0;
+        JLabel jsonLabel = new JLabel("JSON Modell");
+        jsonLabel.setFont(jsonLabel.getFont().deriveFont(Font.BOLD, 14f));
+        mainPanel.add(jsonLabel, gbc);
+        row++;
 
-            // Add Field
-            gbc.gridx = 1;
-            gbc.weightx = 1.0;
-            if (isMultiLine) {
-                gbc.fill = GridBagConstraints.BOTH;
-                gbc.weighty = 0.3;
+        for (Map.Entry<String, JComponent> entry : jsonModellSettingsMap.entrySet()) {
+            gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 1; gbc.weightx = 0;
+            String key = entry.getKey();
+            if ("Reasoning Enabled".equals(key)) {
+                mainPanel.add(new JLabel("Reasoning:"), gbc);
             } else {
-                gbc.fill = GridBagConstraints.HORIZONTAL;
-                gbc.weighty = 0;
+                mainPanel.add(new JLabel(key + ":"), gbc);
             }
-            einstellungenTab.add(entry.getValue(), gbc);
-
-            gbc.anchor = GridBagConstraints.NORTHWEST;
+            gbc.gridx = 1; gbc.weightx = 1.0; gbc.gridwidth = 1;
+            mainPanel.add(entry.getValue(), gbc);
             row++;
         }
+        row++;
 
-        // Add Save Button
+        // Divider / Separator
+        gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2; gbc.weightx = 1.0;
+        JSeparator separator = new JSeparator(SwingConstants.HORIZONTAL);
+        separator.setPreferredSize(new Dimension(0, 2));
+        mainPanel.add(separator, gbc);
+        row++;
+        row++;
+
+        // OCR Modell Panel
+        gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2; gbc.weightx = 1.0;
+        JLabel ocrLabel = new JLabel("OCR Modell");
+        ocrLabel.setFont(ocrLabel.getFont().deriveFont(Font.BOLD, 14f));
+        mainPanel.add(ocrLabel, gbc);
+        row++;
+
+        for (Map.Entry<String, JComponent> entry : ocrModellSettingsMap.entrySet()) {
+            gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 1; gbc.weightx = 0;
+            String key = entry.getKey();
+            if ("Reasoning Enabled".equals(key)) {
+                mainPanel.add(new JLabel("Reasoning:"), gbc);
+            } else {
+                mainPanel.add(new JLabel(key + ":"), gbc);
+            }
+            gbc.gridx = 1; gbc.weightx = 1.0; gbc.gridwidth = 1;
+            mainPanel.add(entry.getValue(), gbc);
+            row++;
+        }
+        row++;
+
+        // Save Button
         JButton saveButton = new JButton("Speichern");
         saveButton.addActionListener(e -> saveEinstellungen());
-
-        gbc.gridx = 0;
-        gbc.gridy = row;
-        gbc.gridwidth = 2;
-        gbc.weighty = 0;
+        gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2; gbc.weightx = 0;
         gbc.anchor = GridBagConstraints.CENTER;
-        einstellungenTab.add(saveButton, gbc);
+        mainPanel.add(saveButton, gbc);
 
-        // Add a vertical spacer to push fields to the top
-        gbc.gridy = row + 1;
-        gbc.weighty = 1.0; // Fills the remaining vertical space
-        einstellungenTab.add(Box.createVerticalGlue(), gbc);
+        gbc.gridy = row + 1; gbc.weighty = 1.0;
+        mainPanel.add(Box.createVerticalGlue(), gbc);
 
-        einstellungenTab.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-
-        return einstellungenTab;
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        return mainPanel;
     }
 
     private static void saveEinstellungen() {
-        String baseUrl = ((JTextField) einstellungenFieldsMap.get("Basis URL")).getText().trim();
-        String ocrModel = ((JTextField) einstellungenFieldsMap.get("OCR-Modell")).getText().trim();
-        String jsonModel = ((JTextField) einstellungenFieldsMap.get("JSON Modell")).getText().trim();
+        // JSON Modell settings
+        String jsonApiKey = ((JPasswordField) jsonModellSettingsMap.get("API Key")).getText();
+        String jsonBaseUrl = ((JTextField) jsonModellSettingsMap.get("Basis URL")).getText().trim();
+        String jsonModelName = ((JTextField) jsonModellSettingsMap.get("Modell Name")).getText().trim();
+        boolean jsonReasoning = ((JCheckBox) jsonModellSettingsMap.get("Reasoning Enabled")).isSelected();
 
-        if (baseUrl.isEmpty())   baseUrl   = "http://localhost:11434";
-        if (ocrModel.isEmpty())  ocrModel  = "glm-ocr:q8_0";
-        if (jsonModel.isEmpty()) jsonModel = "qwen3:4b-q8_0";
+        // OCR Modell settings
+        String ocrApiKey = ((JPasswordField) ocrModellSettingsMap.get("API Key")).getText();
+        String ocrBaseUrl = ((JTextField) ocrModellSettingsMap.get("Basis URL")).getText().trim();
+        String ocrModelName = ((JTextField) ocrModellSettingsMap.get("Modell Name")).getText().trim();
+        boolean ocrReasoning = ((JCheckBox) ocrModellSettingsMap.get("Reasoning Enabled")).isSelected();
 
-        prefs.put("ApiKey",     ((JTextField) einstellungenFieldsMap.get("API Key")).getText());
-        prefs.put("BaseUrl",    baseUrl);
-        prefs.put("OcrModel",   ocrModel);
-        prefs.put("ModelRepo",  jsonModel);
+        // Set defaults
+        if (jsonBaseUrl.isEmpty()) jsonBaseUrl = "http://localhost:11434";
+        if (jsonModelName.isEmpty()) jsonModelName = "qwen3:4b-q8_0";
+        if (ocrBaseUrl.isEmpty()) ocrBaseUrl = "http://localhost:11434";
+        if (ocrModelName.isEmpty()) ocrModelName = "glm-ocr:q8_0";
 
-        // Refresh UI to show applied defaults
+        // Save JSON Modell settings
+        prefs.put("JsonApiKey", jsonApiKey);
+        prefs.put("JsonBaseUrl", jsonBaseUrl);
+        prefs.put("JsonModelName", jsonModelName);
+        prefs.put("JsonReasoning", String.valueOf(jsonReasoning));
+
+        // Save OCR Modell settings
+        prefs.put("OcrApiKey", ocrApiKey);
+        prefs.put("OcrBaseUrl", ocrBaseUrl);
+        prefs.put("OcrModelName", ocrModelName);
+        prefs.put("OcrReasoning", String.valueOf(ocrReasoning));
+
         loadEinstellungen();
         JOptionPane.showMessageDialog(null, "Einstellungen gespeichert.", "Speichern", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private static void loadEinstellungen() {
-        ((JTextField) einstellungenFieldsMap.get("API Key")).setText(prefs.get("ApiKey", prefs.get("OpenAIKey", "")));
-        ((JTextField) einstellungenFieldsMap.get("Basis URL")).setText(prefs.get("BaseUrl", "http://localhost:11434"));
-        ((JTextField) einstellungenFieldsMap.get("OCR-Modell")).setText(prefs.get("OcrModel", "glm-ocr:q8_0"));
-        ((JTextField) einstellungenFieldsMap.get("JSON Modell")).setText(prefs.get("ModelRepo", "qwen3:4b-q8_0"));
+        // JSON Modell settings
+        ((JPasswordField) jsonModellSettingsMap.get("API Key")).setText(prefs.get("JsonApiKey", ""));
+        ((JTextField) jsonModellSettingsMap.get("Basis URL")).setText(prefs.get("JsonBaseUrl", "http://localhost:11434"));
+        ((JTextField) jsonModellSettingsMap.get("Modell Name")).setText(prefs.get("JsonModelName", "qwen3:4b-q8_0"));
+        ((JCheckBox) jsonModellSettingsMap.get("Reasoning Enabled")).setSelected(
+            Boolean.parseBoolean(prefs.get("JsonReasoning", "false")));
+
+        // OCR Modell settings
+        ((JPasswordField) ocrModellSettingsMap.get("API Key")).setText(prefs.get("OcrApiKey", ""));
+        ((JTextField) ocrModellSettingsMap.get("Basis URL")).setText(prefs.get("OcrBaseUrl", "http://localhost:11434"));
+        ((JTextField) ocrModellSettingsMap.get("Modell Name")).setText(prefs.get("OcrModelName", "glm-ocr:q8_0"));
+        ((JCheckBox) ocrModellSettingsMap.get("Reasoning Enabled")).setSelected(
+            Boolean.parseBoolean(prefs.get("OcrReasoning", "false")));
     }
 
     private static void configureDragAndDrop(JPanel panel, JLabel messageLabel, JFrame frame, JLabel statusBar,
@@ -1091,25 +1135,38 @@ public class Main {
         String myOrt = prefs.get("MU_Ort", "");
         String myLand = prefs.get("MU_Land", "DE");
         String myTaxId = prefs.get("MU_StNrUStID", prefs.get("Steuernummer", prefs.get("UStID", "")));
-        String baseUrl = prefs.get("BaseUrl", "");
-        String apiKey = prefs.get("ApiKey", prefs.get("OpenAIKey", ""));
-        String ocrModel = prefs.get("OcrModel", "");
-        String jsonModel = prefs.get("ModelRepo", "");
 
-        if (baseUrl == null || baseUrl.trim().isEmpty()) {
-            baseUrl = System.getenv("LLM_BASE_URL");
+        // JSON Modell settings
+        String jsonBaseUrl = prefs.get("JsonBaseUrl", "");
+        String jsonApiKey = prefs.get("JsonApiKey", "");
+        String jsonModelName = prefs.get("JsonModelName", "");
+        String jsonReasoning = prefs.get("JsonReasoning", "false");
+
+        // OCR Modell settings
+        String ocrBaseUrl = prefs.get("OcrBaseUrl", "");
+        String ocrApiKey = prefs.get("OcrApiKey", "");
+        String ocrModelName = prefs.get("OcrModelName", "");
+        String ocrReasoning = prefs.get("OcrReasoning", "false");
+
+        // Set defaults for JSON Modell
+        if (jsonBaseUrl == null || jsonBaseUrl.trim().isEmpty()) {
+            jsonBaseUrl = "http://localhost:11434";
         }
-        if (baseUrl == null || baseUrl.trim().isEmpty()) {
-            baseUrl = "http://localhost:11434";
+        if (jsonModelName == null || jsonModelName.trim().isEmpty()) {
+            jsonModelName = "qwen3:4b-q8_0";
         }
-        if (ocrModel == null || ocrModel.trim().isEmpty()) {
-            ocrModel = "glm-ocr:q8_0";
+
+        // Set defaults for OCR Modell
+        if (ocrBaseUrl == null || ocrBaseUrl.trim().isEmpty()) {
+            ocrBaseUrl = "http://localhost:11434";
         }
-        if (jsonModel == null || jsonModel.trim().isEmpty()) {
-            jsonModel = "qwen3:4b-q8_0";
+        if (ocrModelName == null || ocrModelName.trim().isEmpty()) {
+            ocrModelName = "glm-ocr:q8_0";
         }
+
         // Strip trailing /v1 — ocr.ts normalises itself too, but be consistent
-        baseUrl = baseUrl.replaceAll("/v1/?$", "").replaceAll("/$", "");
+        jsonBaseUrl = jsonBaseUrl.replaceAll("/v1/?$", "").replaceAll("/$", "");
+        ocrBaseUrl = ocrBaseUrl.replaceAll("/v1/?$", "").replaceAll("/$", "");
 
         List<String> command = new ArrayList<>(List.of(
                 bun, "run", ocrScriptPath,
@@ -1123,10 +1180,14 @@ public class Main {
                 "--my-ort",         myOrt,
                 "--my-land",        myLand,
                 "--my-tax-id",      myTaxId,
-                "--base-url",       baseUrl,
-                "--api-key",        apiKey,
-                "--ocr-model",      ocrModel,
-                "--json-model",     jsonModel
+                "--json-base-url",  jsonBaseUrl,
+                "--json-api-key",   jsonApiKey,
+                "--json-model",     jsonModelName,
+                "--json-reasoning", jsonReasoning,
+                "--ocr-base-url",   ocrBaseUrl,
+                "--ocr-api-key",    ocrApiKey,
+                "--ocr-model",      ocrModelName,
+                "--ocr-reasoning",  ocrReasoning
         ));
 
         System.out.println("Running bun OCR pipeline:");
