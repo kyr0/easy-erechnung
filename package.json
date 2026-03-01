@@ -1,23 +1,23 @@
 {
-  "name": "easy-e-rechnung",
-  "version": "1.0.0",
-  "type": "module",
-  "main": "dist/ocr-pipeline.js",
-  "bin": {
-    "ocr-pipeline": "./dist/ocr-pipeline.js"
-  },
-  "scripts": {
-    "build": "bun",
-    "start": "bun run src/ocr.ts",
-    "e2e": "bun run src/e2e.ts"
-  },
-  "dependencies": {
-    "jimp": "^0.16.1",
-    "pdf-to-img": "^5.0.0",
-    "wasm-csv-parser": "^1.0.1"
-  },
-  "devDependencies": {
-    "typescript": "^5.3.3",
-    "vitest": "^4.0.18"
-  }
+	"name": "easy-e-rechnung",
+	"version": "1.0.0",
+	"type": "module",
+	"main": "dist/ocr-pipeline.js",
+	"bin": {
+		"ocr-pipeline": "./dist/ocr-pipeline.js"
+	},
+	"scripts": {
+		"build": "bun",
+		"start": "bun run src/ocr.ts",
+		"e2e": "bun run src/e2e.ts"
+	},
+	"dependencies": {
+		"jimp": "^0.16.1",
+		"pdf-to-img": "^5.0.0",
+		"wasm-csv-parser": "^1.1.0"
+	},
+	"devDependencies": {
+		"typescript": "^5.3.3",
+		"vitest": "^4.0.18"
+	}
 }

@@ -1,5 +1,7 @@
 package de.aronhomberg;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.formdev.flatlaf.FlatLightLaf;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -8,30 +10,29 @@ import org.jdesktop.swingx.JXTable;
 import org.jdesktop.swingx.JXDatePicker;
 
 import javax.swing.event.TableModelEvent;
-import javax.swing.text.DefaultFormatterFactory;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
-import java.text.*;
 import javax.swing.table.DefaultTableCellRenderer;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Locale;
 import javax.swing.*;
 import javax.swing.border.Border;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.text.NumberFormatter;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.dnd.*;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.text.NumberFormat;
 import java.text.ParseException;
 import java.util.*;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -68,6 +69,7 @@ public class Main {
     /** Last selected invoice mode: "eingang" or "ausgang" */
     private static String invoiceMode = "eingang";
     private static JTabbedPane mainTabbedPane;
+    private static JMenuItem createERechnungItem;
 
     private static final Map<String, String> UNIT_TRANSLATIONS = Map.of(
             "C62", "Stück (C62)",
@@ -105,7 +107,7 @@ public class Main {
                 dragDropPanel, // Left side
                 tabbedPane // Right side
         );
-        splitPane.setDividerLocation(640); // Initial divider position — show settings on the right
+        splitPane.setDividerLocation(740); // Initial divider position — show settings on the right
 
         configureDragAndDrop(dragDropPanel, dragDropLabel, frame, statusBar, splitPane);
 
@@ -115,7 +117,8 @@ public class Main {
 
         JMenuBar menuBar = new JMenuBar();
         JMenu fileMenu = new JMenu("Datei");
-        JMenuItem createERechnungItem = new JMenuItem("e-Rechnung erstellen");
+        createERechnungItem = new JMenuItem("e-Rechnung erstellen");
+        createERechnungItem.setEnabled(false);
 
         createERechnungItem.addActionListener(e -> createERechnung());
 
@@ -137,7 +140,7 @@ public class Main {
 
     private static JFrame createMainFrame() {
         JFrame frame = new JFrame(TITLE);
-        frame.setSize(1024, 900);
+        frame.setSize(1174, 900);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setLayout(new BorderLayout());
         return frame;
@@ -332,6 +335,11 @@ public class Main {
             if (!validateAll()) {
                 return;
             }
+
+            // Convert to PDF/A before creating e-Rechnung
+            String archivePdfFilePath = PdfAConverter.convertToPdfA(pdfFilePath);
+            PdfAConverter.validatePDFA(archivePdfFilePath);
+            Main.pdfFilePath = archivePdfFilePath;
 
             InvoiceResponse.Invoice invoice = collectFormData();
             ZUGFeRDInvoiceWriter writer = new ZUGFeRDInvoiceWriter(invoice, pdfFilePath);
@@ -1321,6 +1329,66 @@ public class Main {
         return aiJsonPath;
     }
 
+    /**
+     * Checks if a BIC string has a valid format (8 or 11 alphanumeric characters).
+     */
+    private static boolean isValidBICFormat(String bic) {
+        if (bic == null) return false;
+        String trimmed = bic.trim();
+        return trimmed.matches("[A-Za-z0-9]{8}([A-Za-z0-9]{3})?");
+    }
+
+    /**
+     * Validates a BIC code by calling the TypeScript BIC check script via bun.
+     * Returns the bank name if valid, or null if invalid/empty.
+     */
+    private static String validateBICViaBun(String bic) {
+        if (bic == null || bic.trim().isEmpty()) {
+            return null;
+        }
+
+        String bun = resolveBunExecutable();
+        String currentPath = System.getProperty("user.dir");
+        String bicCheckScriptPath = currentPath + File.separator + "src" + File.separator + "bic-check.ts";
+
+        List<String> command = List.of(bun, "run", bicCheckScriptPath, bic.trim());
+
+        try {
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.directory(new File(currentPath));
+            pb.redirectErrorStream(true);
+
+            Process process = pb.start();
+            String output;
+            try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                output = reader.lines().collect(Collectors.joining("\n"));
+            }
+
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                System.err.println("BIC check exited with code " + exitCode);
+                return null;
+            }
+
+            // Parse JSON result using Jackson
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode json = mapper.readTree(output.trim());
+                if (json.has("valid") && json.get("valid").asBoolean()) {
+                    return json.has("name") ? json.get("name").asText() : null;
+                }
+            } catch (Exception e) {
+                System.err.println("Failed to parse BIC check result: " + e.getMessage());
+            }
+
+            return null;
+        } catch (IOException | InterruptedException e) {
+            System.err.println("Failed to run BIC check: " + e.getMessage());
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
     private static void populateFormWithInvoiceData(InvoiceResponse.Invoice invoice) {
         if (invoice == null)
             return;
@@ -1384,26 +1452,31 @@ public class Main {
         ((JTextField) invoiceDetailsMap.get("Rechnungsnummer"))
                 .setText(Optional.ofNullable(invoice.InvoiceNumber).orElse(""));
 
-        if (invoice.PaymentMeans != null && invoice.PaymentMeans.PaymentInformation != null) {
-            // Legacy nested format
-            ((JTextField) invoiceDetailsMap.get("IBAN"))
-                    .setText(Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.IBAN).orElse(""));
-            ((JTextField) invoiceDetailsMap.get("BIC"))
-                    .setText(Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.BIC).orElse(""));
-            ((JTextField) invoiceDetailsMap.get("Bank Name"))
-                    .setText(Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.BankName).orElse(""));
-            ((JTextField) invoiceDetailsMap.get("Zahlungsreferenz"))
-                    .setText(Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.PaymentReference).orElse(""));
-            ((JTextField) invoiceDetailsMap.get("Zahlungsempfänger"))
-                    .setText(Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.PaymentReceiver).orElse(""));
-        } else {
-            // New flat format
-            ((JTextField) invoiceDetailsMap.get("IBAN")).setText(Optional.ofNullable(invoice.IBAN).orElse(""));
-            ((JTextField) invoiceDetailsMap.get("BIC")).setText(Optional.ofNullable(invoice.BIC).orElse(""));
-            ((JTextField) invoiceDetailsMap.get("Bank Name")).setText(Optional.ofNullable(invoice.BankName).orElse(""));
-            ((JTextField) invoiceDetailsMap.get("Zahlungsreferenz")).setText(Optional.ofNullable(invoice.PaymentReference).orElse(""));
-            ((JTextField) invoiceDetailsMap.get("Zahlungsempfänger")).setText(Optional.ofNullable(invoice.PaymentReceiver).orElse(""));
-        }
+        // For each payment field, prefer flat format value when non-empty, fall back to nested
+        String iban = Optional.ofNullable(invoice.IBAN).filter(s -> !s.isEmpty()).orElse(
+                invoice.PaymentMeans != null && invoice.PaymentMeans.PaymentInformation != null
+                        ? Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.IBAN).orElse("") : "");
+        String bic = Optional.ofNullable(invoice.BIC).filter(s -> !s.isEmpty()).orElse(
+                invoice.PaymentMeans != null && invoice.PaymentMeans.PaymentInformation != null
+                        ? Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.BIC).orElse("") : "");
+        String bankName = Optional.ofNullable(invoice.BankName).filter(s -> !s.isEmpty()).orElse(
+                invoice.PaymentMeans != null && invoice.PaymentMeans.PaymentInformation != null
+                        ? Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.BankName).orElse("") : "");
+        String payRef = Optional.ofNullable(invoice.PaymentReference).filter(s -> !s.isEmpty()).orElse(
+                invoice.PaymentMeans != null && invoice.PaymentMeans.PaymentInformation != null
+                        ? Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.PaymentReference).orElse("") : "");
+        String payReceiver = Optional.ofNullable(invoice.PaymentReceiver).filter(s -> !s.isEmpty()).orElse(
+                invoice.PaymentMeans != null && invoice.PaymentMeans.PaymentInformation != null
+                        ? Optional.ofNullable(invoice.PaymentMeans.PaymentInformation.PaymentReceiver).orElse("") : "");
+
+        System.out.println("[DEBUG] populateForm payment fields: IBAN='" + iban + "', BIC='" + bic
+                + "', BankName='" + bankName + "', PayRef='" + payRef + "', PayReceiver='" + payReceiver + "'");
+
+        ((JTextField) invoiceDetailsMap.get("IBAN")).setText(iban);
+        ((JTextField) invoiceDetailsMap.get("BIC")).setText(bic);
+        ((JTextField) invoiceDetailsMap.get("Bank Name")).setText(bankName);
+        ((JTextField) invoiceDetailsMap.get("Zahlungsreferenz")).setText(payRef);
+        ((JTextField) invoiceDetailsMap.get("Zahlungsempfänger")).setText(payReceiver);
 
         // Fill summen und steuern fields
         if (invoice.MonetarySummation != null) {
@@ -1729,7 +1802,7 @@ public class Main {
 
         SwingUtilities.invokeLater(() -> {
             splitPane.setRightComponent(processingPanel); // Temporarily set the processing panel
-            splitPane.setDividerLocation(640);
+            splitPane.setDividerLocation(740);
             splitPane.revalidate();
             splitPane.repaint();
         });
@@ -1822,9 +1895,30 @@ public class Main {
                     throwIfCancelled(isCancelled);
 
                     String cachedJson = FileUtils.readFileAsText(aiJsonPath);
+                    System.out.println("[DEBUG] Raw AI JSON path: " + aiJsonPath);
+                    if (cachedJson != null) {
+                        System.out.println("[DEBUG] Raw AI JSON (first 2000 chars): " + cachedJson.substring(0, Math.min(cachedJson.length(), 2000)));
+                    } else {
+                        System.err.println("[DEBUG] AI JSON file was null/empty");
+                    }
                     InvoiceResponse invoiceResponse = cachedJson != null
                             ? JsonParser.parseInvoiceResponse(cachedJson) : null;
                     invoice = invoiceResponse != null ? invoiceResponse.invoice : null;
+                    if (invoice != null) {
+                        System.out.println("[DEBUG] Parsed invoice fields:");
+                        System.out.println("[DEBUG]   BankName (flat)     = '" + invoice.BankName + "'");
+                        System.out.println("[DEBUG]   BIC (flat)          = '" + invoice.BIC + "'");
+                        System.out.println("[DEBUG]   IBAN (flat)         = '" + invoice.IBAN + "'");
+                        System.out.println("[DEBUG]   PaymentReceiver     = '" + invoice.PaymentReceiver + "'");
+                        System.out.println("[DEBUG]   PaymentReference    = '" + invoice.PaymentReference + "'");
+                        System.out.println("[DEBUG]   PaymentMeans        = " + invoice.PaymentMeans);
+                        if (invoice.PaymentMeans != null && invoice.PaymentMeans.PaymentInformation != null) {
+                            var pi = invoice.PaymentMeans.PaymentInformation;
+                            System.out.println("[DEBUG]   PM.PI.BankName     = '" + pi.BankName + "'");
+                            System.out.println("[DEBUG]   PM.PI.BIC          = '" + pi.BIC + "'");
+                            System.out.println("[DEBUG]   PM.PI.IBAN         = '" + pi.IBAN + "'");
+                        }
+                    }
                 }
 
                 // Role fix (ohne Prompt-Injection)
@@ -1833,6 +1927,30 @@ public class Main {
 
                 if (invoice != null) {
                     populateFormWithInvoiceData(invoice);
+
+                    // Final post-processing: validate BIC and fill/clear Bank Name
+                    publish("Prüfe BIC...");
+                    processingLabel.setText("Prüfe BIC...");
+                    String bicValue = ((JTextField) invoiceDetailsMap.get("BIC")).getText().trim();
+                    String aiBankName = ((JTextField) invoiceDetailsMap.get("Bank Name")).getText().trim();
+                    System.out.println("[DEBUG] BIC post-processing: BIC='" + bicValue + "', AI BankName='" + aiBankName + "'");
+                    if (!bicValue.isEmpty() && isValidBICFormat(bicValue)) {
+                        String bankName = validateBICViaBun(bicValue);
+                        System.out.println("[DEBUG] BIC lookup result: bankName='" + bankName + "'");
+                        if (bankName != null && !bankName.isEmpty()) {
+                            // BIC lookup succeeded — use the verified bank name
+                            SwingUtilities.invokeLater(() -> {
+                                ((JTextField) invoiceDetailsMap.get("Bank Name")).setText(bankName);
+                            });
+                        } else {
+                            // BIC lookup failed (e.g. foreign BIC) — keep AI-extracted Bank Name
+                            System.out.println("[DEBUG] BIC lookup returned null, keeping AI-extracted BankName='" + aiBankName + "'");
+                        }
+                    } else {
+                        // No valid BIC — keep AI-extracted Bank Name if available
+                        System.out.println("[DEBUG] BIC invalid or empty, keeping AI-extracted BankName='" + aiBankName + "'");
+                    }
+
                     processingLabel.setText("Rechnungsdaten geladen.");
                     publish("Rechnungsdaten geladen.");
                 } else {
@@ -1840,24 +1958,6 @@ public class Main {
                     publish("Rechnungsdaten konnten nicht geladen werden.");
                 }
 
-                // Step 4: Convert original file to PDF/A
-                publish("Konvertiere zu PDF/A-Format...");
-                processingLabel.setText("Konvertiere zu PDF/A-Format...");
-                String archivePdfFilePath = runWithCancellation(() -> PdfAConverter.convertToPdfA(pdfFilePath),
-                        isCancelled);
-                throwIfCancelled(isCancelled);
-
-                // Step 5: Validate PDF/A file
-                publish("Validiere PDF/A-Datei...");
-                processingLabel.setText("Validiere PDF/A-Datei...");
-                runWithCancellation(() -> {
-                    PdfAConverter.validatePDFA(archivePdfFilePath);
-                    return null;
-                }, isCancelled);
-                throwIfCancelled(isCancelled);
-
-                // update to use archive as current pdfFilePath
-                Main.pdfFilePath = archivePdfFilePath;
                 return null;
             }
 
@@ -1890,12 +1990,15 @@ public class Main {
                     // Restore the original right component and enable data tabs
                     SwingUtilities.invokeLater(() -> {
                         splitPane.setRightComponent(originalRightComponent);
-                        splitPane.setDividerLocation(640);
+                        splitPane.setDividerLocation(740);
                         if (mainTabbedPane != null) {
                             mainTabbedPane.setEnabledAt(0, true); // Basisdaten
                             mainTabbedPane.setEnabledAt(1, true); // Positionen
                             mainTabbedPane.setEnabledAt(2, true); // Summen und Steuern
                             mainTabbedPane.setSelectedIndex(0);   // Switch to Basisdaten
+                        }
+                        if (createERechnungItem != null) {
+                            createERechnungItem.setEnabled(true);
                         }
                         splitPane.revalidate();
                         splitPane.repaint();
@@ -1991,7 +2094,7 @@ public class Main {
 
                 SwingUtilities.invokeLater(() -> {
                     splitPane.setLeftComponent(scrollPane);
-                    splitPane.setDividerLocation(512);
+                    splitPane.setDividerLocation(612);
                     splitPane.revalidate();
                     splitPane.repaint();
                 });
@@ -2013,7 +2116,7 @@ public class Main {
 
                 SwingUtilities.invokeLater(() -> {
                     splitPane.setLeftComponent(pdfTabs);
-                    splitPane.setDividerLocation(512);
+                    splitPane.setDividerLocation(612);
                     splitPane.revalidate();
                     splitPane.repaint();
                 });
