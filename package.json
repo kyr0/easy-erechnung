@@ -12,7 +12,6 @@
     "e2e": "bun run src/e2e.ts"
   },
   "dependencies": {
-    "date-fns": "^4.1.0",
     "jimp": "^0.16.1",
     "pdf-to-img": "^5.0.0",
     "wasm-csv-parser": "^1.0.1"

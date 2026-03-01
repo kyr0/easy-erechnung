@@ -18,7 +18,6 @@
 import { exec, spawn } from 'child_process';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync } from 'fs';
 import { extname, join, dirname } from 'path';
-import { parse, differenceInDays, isValid } from 'date-fns';
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { createHash } from 'crypto';
@@ -266,22 +265,26 @@ class LLMClient {
     _myCompany: { name: string; street: string; hausnr: string; plz: string; ort: string; land: string; taxId: string },
   ): Promise<string> {
 
-    const systemMessage = `You are an expert OCR data analyst and accountant.
-Extract invoice data from OCR text and output a single JSON object matching the ZUGFeRD/EN16931-like structure below.
+    const systemMessage = `You are a strict data mapper. Your ONLY job is to copy values from the OCR text into the correct JSON fields.
 
-Rules:
+CRITICAL RULES:
+- NEVER calculate, derive, or infer any numeric value. Every number in the output must appear exactly as written in the document.
+- Copy Quantity, UnitPrice, LineTotalAmount, TaxAmount, TaxPercentage, and all MonetarySummation values EXACTLY as they appear in the text.
+- Do NOT recompute totals, do NOT multiply quantity × price, do NOT verify that line totals add up. Just copy the numbers.
 - The OCR text may come from multiple pages separated by "--- PAGE N ---". Merge into ONE invoice.
-- Extract ONLY what is present. If unknown: "" or 0.0.
-- Do NOT invent values.
-- InvoiceNumber is NOT a LineID.
-- Do NOT duplicate line items across pages.
-- PaymentReference: only if explicitly stated (distinct reference); otherwise "".
-- Units use UN/CEFACT codes (e.g. HUR, DAY, C62).`;
+- If a value is not found in the text: use "" for strings, 0.0 for numbers.
+- Do NOT invent or hallucinate values.
+- InvoiceNumber is NOT a LineID. Look for "Rechnungsnummer", "Invoice #", "RE-", "INV-" etc.
+- Do NOT duplicate line items that appear on multiple pages.
+- PaymentReference: only if explicitly stated as a distinct reference code; otherwise "".
+- Unit: if a unit is explicitly stated (e.g. "Stunden", "Tage", "Stück"), map it to the corresponding UN/CEFACT code (HUR, DAY, C62). If no unit is stated, infer the most likely unit from the line item description context (e.g. hourly rate → HUR, daily rate → DAY, otherwise C62). Never calculate a unit from date ranges or quantities.`;
 
     const userMessage = `MODE (hint only): ${mode.toUpperCase()}
 
 OCR'd invoice text:
 ${markdown}
+
+REMINDER: Copy ALL numbers exactly as written. Do NOT calculate or verify anything. Just map text to fields.
 
 Return ONLY valid JSON matching exactly this structure:
 {
@@ -468,44 +471,6 @@ function extractJson(raw: string): string {
   }
 
   throw new Error('LLM-Antwort enthält kein gültiges JSON-Objekt');
-}
-
-// ── Markdown preprocessing ────────────────────────────────────────────────────
-
-/** Common date formats found on German/European invoices */
-const DATE_FORMATS = ['dd.MM.yyyy', 'dd/MM/yyyy', 'yyyy-MM-dd', 'dd-MM-yyyy'];
-
-/**
- * Scan each line for date ranges (two dates on the same line).
- * When found, calculate the difference in days and append "DAYS: N".
- */
-function preprocessMarkdownDates(markdown: string): string {
-  // Match date-like tokens: dd.MM.yyyy, dd/MM/yyyy, yyyy-MM-dd, dd-MM-yyyy
-  const dateTokenRe = /\b(\d{1,4}[.\-/]\d{1,2}[.\-/]\d{1,4})\b/g;
-
-  return markdown
-    .split('\n')
-    .map(line => {
-      const tokens: Date[] = [];
-      for (const m of line.matchAll(dateTokenRe)) {
-        for (const fmt of DATE_FORMATS) {
-          const d = parse(m[1], fmt, new Date());
-          if (isValid(d) && d.getFullYear() >= 1990 && d.getFullYear() <= 2099) {
-            tokens.push(d);
-            break;
-          }
-        }
-      }
-      // If we found exactly a date range (2 dates), annotate with day count
-      if (tokens.length >= 2) {
-        const days = Math.abs(differenceInDays(tokens[tokens.length - 1], tokens[0]));
-        if (days > 0 && !line.includes('DAYS:')) {
-          return `${line}  DAYS: ${days}`;
-        }
-      }
-      return line;
-    })
-    .join('\n');
 }
 
 // ── File helpers ──────────────────────────────────────────────────────────────
@@ -794,11 +759,8 @@ async function main() {
       .map(p => `--- PAGE ${p.page} ---\n${p.markdown}`)
       .join('\n\n');
 
-    // Pre-process: annotate date ranges with day counts so the LLM can use them
-    const preprocessedMarkdown = preprocessMarkdownDates(combinedMarkdown);
-
     const jsonT0 = Date.now();
-    const invoiceJson = await jsonLlm.convertMarkdownToJson(preprocessedMarkdown, mode, myCompany);
+    const invoiceJson = await jsonLlm.convertMarkdownToJson(combinedMarkdown, mode, myCompany);
     console.log(`[JSON] Extraktion abgeschlossen in ${((Date.now() - jsonT0) / 1000).toFixed(1)}s`);
 
     // Parse to validate and pretty-print
