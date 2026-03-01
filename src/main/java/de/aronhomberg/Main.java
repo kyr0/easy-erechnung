@@ -70,7 +70,7 @@ public class Main {
     private static JTabbedPane mainTabbedPane;
 
     private static final Map<String, String> UNIT_TRANSLATIONS = Map.of(
-            "PCE", "Stück (PCE)",
+            "C62", "Stück (C62)",
             "HUR", "Stunden (HUR)",
             "DAY", "Tage (DAY)");
 
@@ -437,20 +437,6 @@ public class Main {
     }
 
     private static JPanel createPositionenTab() {
-        // Mapping von Werten zu übersetzten Labels
-        Map<String, String> unitTranslations = new HashMap<>();
-        unitTranslations.put("PCE", "Stück (PCE)");
-        unitTranslations.put("HUR", "Stunden (HUR)");
-        unitTranslations.put("DAY", "Tage (DAY)");
-
-        Map<String, String> taxTranslations = new HashMap<>();
-        taxTranslations.put("S", "19% (Normal, S)");
-        taxTranslations.put("AA", "7% (Ermäßigt, AA)");
-        taxTranslations.put("E", "Befreit (E)");
-        taxTranslations.put("AE", "Steuerumkehr (AE)");
-        taxTranslations.put("K", "Innergemeinschaftliche Lieferung (K)");
-        taxTranslations.put("G", "0% (Nullsteuersatz, G)");
-
         // Create a panel with BorderLayout
         JPanel positionenTab = new JPanel(new BorderLayout());
 
@@ -548,13 +534,13 @@ public class Main {
         table.getColumnModel().getColumn(4).setCellEditor(decimalEditor); // Einzelpreis
         table.getColumnModel().getColumn(5).setCellEditor(decimalEditor); // Gesamtpreis
 
-        // Einheit - Dropdown (ComboBox) mit übersetzten Labels
-        JComboBox<String> unitComboBox = new JComboBox<>(unitTranslations.values().toArray(new String[0]));
-        table.getColumnModel().getColumn(3).setCellEditor(new DefaultCellEditor(unitComboBox));
+        // Einheit (Spalte 3): Anzeige Label, Speicherung Code
+        table.getColumnModel().getColumn(3).setCellRenderer(new CodeLabelRenderer(UNIT_TRANSLATIONS));
+        table.getColumnModel().getColumn(3).setCellEditor(new CodeLabelCellEditor(UNIT_TRANSLATIONS));
 
-        // Steuerklasse - Dropdown (ComboBox) mit übersetzten Labels
-        JComboBox<String> taxComboBox = new JComboBox<>(taxTranslations.values().toArray(new String[0]));
-        table.getColumnModel().getColumn(6).setCellEditor(new DefaultCellEditor(taxComboBox));
+        // Steuerklasse (Spalte 6): Anzeige Label, Speicherung Code
+        table.getColumnModel().getColumn(6).setCellRenderer(new CodeLabelRenderer(TAX_TRANSLATIONS));
+        table.getColumnModel().getColumn(6).setCellEditor(new CodeLabelCellEditor(TAX_TRANSLATIONS));
 
         // Add automatic calculation of total amount
         table.getModel().addTableModelListener(e -> {
@@ -1064,6 +1050,101 @@ public class Main {
         return new File(parentPath, "_" + baseName + "." + suffix + ".json").getAbsolutePath();
     }
 
+    private static class MyCompany {
+        final String name, street, hausnr, plz, ort, land, taxId;
+        MyCompany(String name, String street, String hausnr, String plz, String ort, String land, String taxId) {
+            this.name = nn(name); this.street = nn(street); this.hausnr = nn(hausnr);
+            this.plz = nn(plz); this.ort = nn(ort); this.land = nn(land); this.taxId = nn(taxId);
+        }
+        String streetLine() { return (street + " " + hausnr).trim(); }
+        private static String nn(String s) { return s == null ? "" : s.trim(); }
+    }
+
+    private static MyCompany loadMyCompany() {
+        return new MyCompany(
+            prefs.get("MU_Name", ""),
+            prefs.get("MU_Strasse", ""),
+            prefs.get("MU_Hausnr", ""),
+            prefs.get("MU_PLZ", ""),
+            prefs.get("MU_Ort", ""),
+            prefs.get("MU_Land", "DE"),
+            prefs.get("MU_StNrUStID", prefs.get("Steuernummer", prefs.get("UStID", "")))
+        );
+    }
+
+    private static void applyMyCompanyRole(InvoiceResponse.Invoice inv) {
+        if (inv == null) return;
+        MyCompany mc = loadMyCompany();
+
+        InvoiceResponse.Invoice.Party fixed = "eingang".equals(invoiceMode) ? inv.Buyer : inv.Seller;
+        if (fixed == null) fixed = new InvoiceResponse.Invoice.Party();
+
+        fixed.Name = mc.name;
+        fixed.StreetName = mc.streetLine();
+        fixed.PostalCode = mc.plz;
+        fixed.City = mc.ort;
+        fixed.CountryCode = mc.land;
+        fixed.TaxIdentificationNumber = mc.taxId;
+
+        if ("eingang".equals(invoiceMode)) inv.Buyer = fixed;
+        else inv.Seller = fixed;
+
+        // PaymentReceiver: bei Ausgang i.d.R. du selbst
+        if (!"eingang".equals(invoiceMode) && (inv.PaymentReceiver == null || inv.PaymentReceiver.trim().isEmpty())) {
+            inv.PaymentReceiver = mc.name;
+        }
+    }
+
+    private static class CodeLabelRenderer extends DefaultTableCellRenderer {
+        private final Map<String, String> map;
+        CodeLabelRenderer(Map<String, String> map) { this.map = map; }
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
+                boolean hasFocus, int row, int column) {
+            Object v = value;
+            if (v != null) {
+                String s = v.toString();
+                v = map.getOrDefault(s, s);
+            }
+            return super.getTableCellRendererComponent(table, v, isSelected, hasFocus, row, column);
+        }
+    }
+
+    private static class CodeLabelOption {
+        final String code;
+        final String label;
+        CodeLabelOption(String code, String label) { this.code = code; this.label = label; }
+        @Override public String toString() { return label; }
+    }
+
+    private static class CodeLabelCellEditor extends AbstractCellEditor implements javax.swing.table.TableCellEditor {
+        private final JComboBox<Object> combo = new JComboBox<>();
+        private final Map<String, CodeLabelOption> byCode = new HashMap<>();
+
+        CodeLabelCellEditor(Map<String, String> codeToLabel) {
+            combo.setEditable(true);
+            for (var e : codeToLabel.entrySet()) {
+                CodeLabelOption opt = new CodeLabelOption(e.getKey(), e.getValue());
+                byCode.put(e.getKey(), opt);
+                combo.addItem(opt);
+            }
+        }
+
+        @Override public Object getCellEditorValue() {
+            Object sel = combo.getSelectedItem();
+            if (sel instanceof CodeLabelOption) return ((CodeLabelOption) sel).code;
+            return sel == null ? "" : sel.toString().trim();
+        }
+
+        @Override
+        public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
+            String code = value == null ? "" : value.toString();
+            CodeLabelOption opt = byCode.get(code);
+            combo.setSelectedItem(opt != null ? opt : code);
+            return combo;
+        }
+    }
+
     /** Resolves the bun executable. Checks EASY_ERECHNUNG_BUN env var first, then PATH. */
     private static String resolveBunExecutable() {
         String override = System.getenv("EASY_ERECHNUNG_BUN");
@@ -1128,14 +1209,6 @@ public class Main {
         String ocrScriptPath = currentPath + File.separator + "src" + File.separator + "ocr.ts";
         String bun = resolveBunExecutable();
 
-        String myName = prefs.get("MU_Name", "");
-        String myStreet = prefs.get("MU_Strasse", "");
-        String myHausnr = prefs.get("MU_Hausnr", "");
-        String myPlz = prefs.get("MU_PLZ", "");
-        String myOrt = prefs.get("MU_Ort", "");
-        String myLand = prefs.get("MU_Land", "DE");
-        String myTaxId = prefs.get("MU_StNrUStID", prefs.get("Steuernummer", prefs.get("UStID", "")));
-
         // JSON Modell settings
         String jsonBaseUrl = prefs.get("JsonBaseUrl", "");
         String jsonApiKey = prefs.get("JsonApiKey", "");
@@ -1173,13 +1246,6 @@ public class Main {
                 "--input",          pdfFilePath,
                 "--output",         outputJsonPath,
                 "--mode",           invoiceMode,
-                "--my-name",        myName,
-                "--my-street",      myStreet,
-                "--my-hausnr",      myHausnr,
-                "--my-plz",         myPlz,
-                "--my-ort",         myOrt,
-                "--my-land",        myLand,
-                "--my-tax-id",      myTaxId,
                 "--json-base-url",  jsonBaseUrl,
                 "--json-api-key",   jsonApiKey,
                 "--json-model",     jsonModelName,
@@ -1681,78 +1747,97 @@ public class Main {
                 displayPDF(file, splitPane, frame, statusBar);
             throwIfCancelled(isCancelled);
 
-                // Step 2+3: OCR + AI extraction in one bun call
-                publish("OCR & KI-Analyse (bun/TS)...");
-                processingLabel.setText("OCR & KI-Analyse (bun/TS)...");
+                // Step 2+3: ZUGFeRD (eingang) oder OCR+AI
+                publish("Prüfe eingebettetes ZUGFeRD/XML...");
+                processingLabel.setText("Prüfe eingebettetes ZUGFeRD/XML...");
 
-            // Line callback: parse structured log lines from ocr.ts to update page tabs
-            java.util.function.Consumer<String> lineCallback = outputLine -> {
-                // Match "[PAGE N] ..." status lines
-                java.util.regex.Matcher m = java.util.regex.Pattern
-                        .compile("^\\[PAGE (\\d+)\\] (.+)$").matcher(outputLine);
-                if (m.find()) {
-                    int pageIdx = Integer.parseInt(m.group(1));
-                    String msg = m.group(2);
-                    SwingUtilities.invokeLater(() -> {
-                        for (int t = 0; t < pageTabs.getTabCount(); t++) {
-                            if (pageTabs.getTitleAt(t).equals("Seite " + pageIdx)) {
-                                Component c = pageTabs.getComponentAt(t);
-                                if (c instanceof JPanel) {
-                                    JPanel pp = (JPanel) c;
-                                    Component center = ((BorderLayout) pp.getLayout())
-                                            .getLayoutComponent(BorderLayout.CENTER);
-                                    if (center instanceof JLabel) {
-                                        ((JLabel) center).setText(msg);
+                InvoiceResponse.Invoice invoice = null;
+
+                if ("eingang".equals(invoiceMode)) {
+                    var embedded = ZugferdEmbeddedReader.tryParse(file.getAbsolutePath());
+                    if (embedded.isPresent()) {
+                        publish("ZUGFeRD/XML erkannt — OCR wird übersprungen.");
+                        processingLabel.setText("ZUGFeRD/XML erkannt — OCR wird übersprungen.");
+                        invoice = embedded.get();
+                    }
+                }
+
+                if (invoice == null) {
+                    publish("OCR & KI-Analyse (bun/TS)...");
+                    processingLabel.setText("OCR & KI-Analyse (bun/TS)...");
+
+                    // Line callback: parse structured log lines from ocr.ts to update page tabs
+                    java.util.function.Consumer<String> lineCallback = outputLine -> {
+                        // Match "[PAGE N] ..." status lines
+                        java.util.regex.Matcher m = java.util.regex.Pattern
+                                .compile("^\\[PAGE (\\d+)\\] (.+)$").matcher(outputLine);
+                        if (m.find()) {
+                            int pageIdx = Integer.parseInt(m.group(1));
+                            String msg = m.group(2);
+                            SwingUtilities.invokeLater(() -> {
+                                for (int t = 0; t < pageTabs.getTabCount(); t++) {
+                                    if (pageTabs.getTitleAt(t).equals("Seite " + pageIdx)) {
+                                        Component c = pageTabs.getComponentAt(t);
+                                        if (c instanceof JPanel) {
+                                            JPanel pp = (JPanel) c;
+                                            Component center = ((BorderLayout) pp.getLayout())
+                                                    .getLayoutComponent(BorderLayout.CENTER);
+                                            if (center instanceof JLabel) {
+                                                ((JLabel) center).setText(msg);
+                                            }
+                                        }
+                                        pageTabs.setSelectedIndex(t);
+                                        break;
                                     }
                                 }
-                                pageTabs.setSelectedIndex(t);
-                                break;
-                            }
+                            });
                         }
-                    });
-                }
 
-                // Match "[JSON] ..." status lines — update JSON tab
-                java.util.regex.Matcher jm = java.util.regex.Pattern
-                        .compile("^\\[JSON\\] (.+)$").matcher(outputLine);
-                if (jm.find()) {
-                    String msg = jm.group(1);
-                    SwingUtilities.invokeLater(() -> {
-                        jsonStatusLabel.setText(msg);
-                        jsonLogArea.append(msg + "\n");
-                        jsonLogArea.setCaretPosition(jsonLogArea.getDocument().getLength());
-                        // Switch to JSON tab
-                        for (int t = 0; t < pageTabs.getTabCount(); t++) {
-                            if (pageTabs.getTitleAt(t).equals("JSON")) {
-                                pageTabs.setSelectedIndex(t);
-                                break;
-                            }
+                        // Match "[JSON] ..." status lines — update JSON tab
+                        java.util.regex.Matcher jm = java.util.regex.Pattern
+                                .compile("^\\[JSON\\] (.+)$").matcher(outputLine);
+                        if (jm.find()) {
+                            String msg = jm.group(1);
+                            SwingUtilities.invokeLater(() -> {
+                                jsonStatusLabel.setText(msg);
+                                jsonLogArea.append(msg + "\n");
+                                jsonLogArea.setCaretPosition(jsonLogArea.getDocument().getLength());
+                                // Switch to JSON tab
+                                for (int t = 0; t < pageTabs.getTabCount(); t++) {
+                                    if (pageTabs.getTitleAt(t).equals("JSON")) {
+                                        pageTabs.setSelectedIndex(t);
+                                        break;
+                                    }
+                                }
+                            });
                         }
-                    });
+
+                        // Update placeholder label for general progress lines
+                        if (outputLine.startsWith("Verarbeite Seite ")) {
+                            SwingUtilities.invokeLater(() -> processingLabel.setText(outputLine));
+                        }
+                    };
+
+                    String aiJsonPath = ocrWithBun(file, isCancelled, runningOcrProcess, lineCallback);
+                    throwIfCancelled(isCancelled);
+
+                    String cachedJson = FileUtils.readFileAsText(aiJsonPath);
+                    InvoiceResponse invoiceResponse = cachedJson != null
+                            ? JsonParser.parseInvoiceResponse(cachedJson) : null;
+                    invoice = invoiceResponse != null ? invoiceResponse.invoice : null;
                 }
 
-                // Update placeholder label for general progress lines
-                if (outputLine.startsWith("Verarbeite Seite ")) {
-                    SwingUtilities.invokeLater(() -> processingLabel.setText(outputLine));
-                }
-            };
-
-            String aiJsonPath = ocrWithBun(file, isCancelled, runningOcrProcess, lineCallback);
-            throwIfCancelled(isCancelled);
-
-                String cachedJson = FileUtils.readFileAsText(aiJsonPath);
-                InvoiceResponse invoiceResponse = cachedJson != null
-                        ? JsonParser.parseInvoiceResponse(cachedJson) : null;
-                InvoiceResponse.Invoice invoice = invoiceResponse != null ? invoiceResponse.invoice : null;
+                // Role fix (ohne Prompt-Injection)
+                if (invoice != null) applyMyCompanyRole(invoice);
             throwIfCancelled(isCancelled);
 
                 if (invoice != null) {
                     populateFormWithInvoiceData(invoice);
-                    processingLabel.setText("Rechnungsdaten vollständig korrekt erkannt.");
-                    publish("Rechnungsdaten vollständig korrekt erkannt.");
+                    processingLabel.setText("Rechnungsdaten geladen.");
+                    publish("Rechnungsdaten geladen.");
                 } else {
-                    processingLabel.setText("Rechnungsdaten teilweise korrekt erkannt.");
-                    publish("Rechnungsdaten teilweise korrekt erkannt.");
+                    processingLabel.setText("Rechnungsdaten konnten nicht geladen werden.");
+                    publish("Rechnungsdaten konnten nicht geladen werden.");
                 }
 
                 // Step 4: Convert original file to PDF/A

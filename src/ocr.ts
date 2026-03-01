@@ -263,96 +263,56 @@ class LLMClient {
   async convertMarkdownToJson(
     markdown: string,
     mode: 'eingang' | 'ausgang',
-    myCompany: { name: string; street: string; hausnr: string; plz: string; ort: string; land: string; taxId: string },
+    _myCompany: { name: string; street: string; hausnr: string; plz: string; ort: string; land: string; taxId: string },
   ): Promise<string> {
 
-    // Build the street line: combine street + hausnr if both present
-    const streetLine = [myCompany.street, myCompany.hausnr].filter(Boolean).join(' ');
-
-    // Build the "known company" block that's injected depending on mode
-    const myBlock = [
-      myCompany.name,
-      streetLine,
-      [myCompany.plz, myCompany.ort].filter(Boolean).join(' '),
-      myCompany.land,
-      `Steuernummer/USt-ID: ${myCompany.taxId}`,
-    ].filter(Boolean).join('\n');
-
-    // Eingang: user is the Buyer; Ausgang: user is the Seller
-    const fixedRole = mode === 'eingang' ? 'Buyer' : 'Seller';
-    const extractRole = mode === 'eingang' ? 'Seller' : 'Buyer';
-    const fixedLabel = mode === 'eingang' ? 'Rechnung an (Empfänger)' : 'Rechnung von (Absender)';
-    const extractLabel = mode === 'eingang' ? 'Rechnung von (Absender)' : 'Rechnung an (Empfänger)';
-
-    const forbiddenFields = mode === 'ausgang'
-      ? `- The ${extractRole} fields and PaymentReceiver must NEVER contain any of the known company values listed above. If the OCR text is ambiguous, leave those fields empty.`
-      : `- The ${extractRole} fields must NEVER contain any of the known company values listed above. If the OCR text is ambiguous, leave those fields empty.`;
-
     const systemMessage = `You are an expert OCR data analyst and accountant.
-Your task: extract invoice data from OCR'd text and output a single JSON object matching the ZUGFeRD invoice format.
+Extract invoice data from OCR text and output a single JSON object matching the ZUGFeRD/EN16931-like structure below.
 
-The OCR text may come from multiple pages of the same invoice, separated by "--- PAGE N ---" markers.
-You must semantically merge all pages into ONE unified invoice. Different pages may contain different parts of the same invoice (e.g. page 1 has line items, page 2 has payment details/IBAN).
+Rules:
+- The OCR text may come from multiple pages separated by "--- PAGE N ---". Merge into ONE invoice.
+- Extract ONLY what is present. If unknown: "" or 0.0.
+- Do NOT invent values.
+- InvoiceNumber is NOT a LineID.
+- Do NOT duplicate line items across pages.
+- PaymentReference: only if explicitly stated (distinct reference); otherwise "".
+- Units use UN/CEFACT codes (e.g. HUR, DAY, C62).`;
 
-MODE: ${mode.toUpperCase()} — the user's own company is the ${fixedRole} (${fixedLabel}).
+    const userMessage = `MODE (hint only): ${mode.toUpperCase()}
 
-Known company data (ALWAYS use these for the ${fixedRole} section):
-${myBlock}
-
-Fundamental rules:
-- The ${fixedRole} section MUST use EXACTLY the known company data above. Do NOT extract ${fixedRole} data from the document.
-- The ${extractRole} (${extractLabel}) must be extracted from the OCR document text.
-${forbiddenFields}
-- Extract data ONLY from the OCR'd document text below. Do NOT invent or hallucinate values.
-- If a field cannot be found in any page, leave it as an empty string "" or 0.0 for numbers.
-- TaxIdentificationNumber fields must contain ONLY a valid USt-IdNr (e.g. "DE123456789") or Steuernummer (e.g. "147/214/00001"). Customer numbers, mandate references, or other IDs are NOT tax IDs — leave the field as "" if no valid tax ID is found.
-- InvoiceNumber: look for patterns like "Invoice #", "Rechnungsnummer:", "RE-", "INV-" near the top of the document. Do NOT use LineID values as InvoiceNumber.
-- LineID values ("1", "2", "3") are position numbers in the InvoiceLines array, NOT the InvoiceNumber.
-- IBAN, BIC, and BankName usually appear at the very top or very bottom of a page. Look in headers/footers across all pages.
-- NEVER calculate or assume prices, quantities, or totals. Always use the exact numbers written in the document.
-- Unit detection for line items: Use DAY as the unit ONLY if BOTH conditions are met: (1) the line item description contains a date range, AND (2) the quantity value for that position exactly matches the number of days in that date range. If the quantity is larger than the day count, the unit is likely HUR (hours), not DAY. The preprocessed text may include a "DAYS: N" annotation for reference.
-- Combine line items from ALL pages into one InvoiceLines array. Do NOT duplicate items that appear on multiple pages.
-- PaymentReference: ONLY extract an actual payment reference/Verwendungszweck if one is explicitly stated in the document (a distinct number or code). Do NOT copy the invoice number or any other field. If no explicit payment reference is found, set it to "".
-- Return ONLY the raw JSON object. No markdown, no code fences, no explanation.`;
-
-    const userMessage = `OCR'd invoice text:
+OCR'd invoice text:
 ${markdown}
-
-IMPORTANT unit codes:
-- HUR = per hour (also PT, MT)
-- DAY = per day
-- PCE = per unit
-
-Tax percentages are plain numbers (7% → 7.00, 19% → 19.00).
 
 Return ONLY valid JSON matching exactly this structure:
 {
   "Invoice": {
-    "InvoiceNumber": "<invoice number, e.g. RE-20264321/113>",
+    "InvoiceNumber": "",
     "InvoiceDate": "YYYY-MM-DD",
     "DueDate": "YYYY-MM-DD",
     "Seller": {
-      "Name": "${mode === 'ausgang' ? myCompany.name : '<from document>'}",
-      "StreetName": "${mode === 'ausgang' ? streetLine : '<from document>'}",
-      "City": "${mode === 'ausgang' ? myCompany.ort : '<from document>'}",
-      "PostalCode": "${mode === 'ausgang' ? myCompany.plz : '<from document>'}",
-      "CountryCode": "${mode === 'ausgang' ? myCompany.land : 'DE'}",
-      "TaxIdentificationNumber": "${mode === 'ausgang' ? myCompany.taxId : '<from document or empty>'}"
+      "Name": "",
+      "StreetName": "",
+      "City": "",
+      "PostalCode": "",
+      "CountryCode": "",
+      "TaxIdentificationNumber": "",
+      "TaxVATNumber": ""
     },
     "Buyer": {
-      "Name": "${mode === 'eingang' ? myCompany.name : '<from document>'}",
-      "StreetName": "${mode === 'eingang' ? streetLine : '<from document>'}",
-      "City": "${mode === 'eingang' ? myCompany.ort : '<from document>'}",
-      "PostalCode": "${mode === 'eingang' ? myCompany.plz : '<from document>'}",
-      "CountryCode": "${mode === 'eingang' ? myCompany.land : 'DE'}",
-      "TaxIdentificationNumber": "${mode === 'eingang' ? myCompany.taxId : '<from document or empty>'}"
+      "Name": "",
+      "StreetName": "",
+      "City": "",
+      "PostalCode": "",
+      "CountryCode": "",
+      "TaxIdentificationNumber": "",
+      "TaxVATNumber": ""
     },
     "DocumentCurrencyCode": "EUR",
-    "IBAN": "<IBAN>",
-    "BIC": "<BIC>",
-    "BankName": "<bank name>",
-    "PaymentReceiver": "<payment receiver name>",
-    "PaymentReference": "<ONLY if explicitly stated, otherwise empty string>",
+    "IBAN": "",
+    "BIC": "",
+    "BankName": "",
+    "PaymentReceiver": "",
+    "PaymentReference": "",
     "Tax": {
       "TaxTypeCode": "VAT",
       "TaxCategoryCode": "S",
@@ -368,7 +328,7 @@ Return ONLY valid JSON matching exactly this structure:
     "InvoiceLines": [
       {
         "LineID": "1",
-        "ProductName": "<product/service description>",
+        "ProductName": "",
         "Unit": "HUR",
         "Quantity": 0.0,
         "UnitPrice": 0.0,
@@ -843,14 +803,6 @@ async function main() {
 
     // Parse to validate and pretty-print
     const parsed = JSON.parse(invoiceJson);
-
-    // If PaymentReference is empty, copy InvoiceNumber there
-    if (parsed.Invoice) {
-      const inv = parsed.Invoice;
-      if (!inv.PaymentReference && inv.InvoiceNumber) {
-        inv.PaymentReference = inv.InvoiceNumber;
-      }
-    }
 
     const finalJson = JSON.stringify(parsed, null, 2);
 

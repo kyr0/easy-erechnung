@@ -206,10 +206,12 @@ public class ZUGFeRDInvoiceWriter implements IExportableTransaction {
         for (int i = 0; i < lines.size(); i++) {
             InvoiceResponse.Invoice.InvoiceLine line = lines.get(i);
 
+            String unit = (line.Unit != null && !line.Unit.isBlank()) ? line.Unit.trim() : "C62";
+
             items[i] = new Item(
                     BigDecimal.valueOf(line.UnitPrice),
                     BigDecimal.valueOf(line.Quantity),
-                    new Product(line.ProductName, line.ProductName, "C62", BigDecimal.valueOf(line.TaxPercentage))
+                    new Product(line.ProductName, line.ProductName, unit, BigDecimal.valueOf(line.TaxPercentage))
             );
         }
         return items;
