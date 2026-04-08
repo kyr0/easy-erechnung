@@ -211,7 +211,12 @@ public class ZUGFeRDInvoiceWriter implements IExportableTransaction {
             items[i] = new Item(
                     BigDecimal.valueOf(line.UnitPrice),
                     BigDecimal.valueOf(line.Quantity),
-                    new Product(line.ProductName, line.ProductName, unit, BigDecimal.valueOf(line.TaxPercentage))
+                    new Product(
+                            line.ProductName,
+                            line.ProductName,
+                            unit,
+                            BigDecimal.valueOf(line.TaxPercentage),
+                            line.TaxCategoryCode)
             );
         }
         return items;

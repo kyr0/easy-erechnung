@@ -77,12 +77,12 @@ public class Main {
             "DAY", "Tage (DAY)");
 
     private static final Map<String, String> TAX_TRANSLATIONS = Map.of(
-            "S", "19% (Normal, S)",
-            "AA", "7% (Ermäßigt, AA)",
+            TaxCategory.STANDARD, "19% (Normal, S)",
+            TaxCategory.LOWER_RATE, "7% (Ermäßigt, AA)",
             "E", "Befreit (E)",
-            "AE", "Steuerumkehr (AE)",
-            "K", "Innergemeinschaftliche Lieferung (K)",
-            "G", "0% (Nullsteuersatz, G)");
+            TaxCategory.REVERSE_CHARGE, "Steuerumkehr (AE)",
+            TaxCategory.INTRA_COMMUNITY, "Innergemeinschaftliche Lieferung (K)",
+            TaxCategory.FREE_EXPORT, "0% (Nullsteuersatz, G)");
 
     public static void main(String[] args) {
         // Set Look and Feel
@@ -743,6 +743,14 @@ public class Main {
     public static String getSummenUndSteuernField(String fieldName) {
         JTextField field = summenUndSteuernFieldsMap.get(fieldName);
         return field != null ? field.getText() : null;
+    }
+
+    /**
+     * Delegates the legacy invoice-level tax selection to the shared tax-category helper so the
+     * write path and embedded-read path apply the same fallback rule.
+     */
+    private static String dominantTaxCategory(List<InvoiceResponse.Invoice.InvoiceLine> invoiceLines) {
+        return TaxCategory.dominantCategory(invoiceLines);
     }
 
     private static JPanel createMeinUnternehmenTab() {
@@ -1643,15 +1651,6 @@ public class Main {
         monetarySummation.PayableAmount = parseGermanDouble.apply(getSummenUndSteuernField("Gesamtsumme brutto"));
         invoice.MonetarySummation = monetarySummation;
 
-        // Collect tax data
-        InvoiceResponse.Invoice.Tax tax = new InvoiceResponse.Invoice.Tax();
-        double steuer19 = parseGermanDouble.apply(getSummenUndSteuernField("Steuer 19%"));
-        double steuer7 = parseGermanDouble.apply(getSummenUndSteuernField("Steuer 7%"));
-        tax.TaxCategoryCode = steuer19 > 0 ? "S" : "AA";
-        tax.TaxPercentage = tax.TaxCategoryCode.equals("S") ? 19.0 : 7.0;
-        tax.TaxAmount = steuer19 + steuer7;
-        invoice.Tax = tax;
-
         // Collect position data
         List<Map<String, Object>> positions = getAllPositions();
         List<InvoiceResponse.Invoice.InvoiceLine> invoiceLines = new ArrayList<>();
@@ -1674,12 +1673,27 @@ public class Main {
             line.LineTotalAmount = gesamtpreisObj instanceof Number ? ((Number) gesamtpreisObj).doubleValue()
                     : parseGermanDouble.apply(String.valueOf(gesamtpreisObj));
 
-            line.TaxCategoryCode = String.valueOf(position.get("Steuerklasse"));
+            line.TaxCategoryCode = TaxCategory.normalize(String.valueOf(position.get("Steuerklasse")));
             line.Unit = String.valueOf(position.get("Einheit"));
-            line.TaxPercentage = line.TaxCategoryCode.equals("S") ? 19.0 : 7.0;
+            line.TaxPercentage = TaxCategory.toPercentage(line.TaxCategoryCode);
             invoiceLines.add(line);
         }
         invoice.InvoiceLines = invoiceLines;
+
+        // Collect tax data
+        InvoiceResponse.Invoice.Tax tax = new InvoiceResponse.Invoice.Tax();
+        double steuer19 = parseGermanDouble.apply(getSummenUndSteuernField("Steuer 19%"));
+        double steuer7 = parseGermanDouble.apply(getSummenUndSteuernField("Steuer 7%"));
+        // In EN 16931 / Peppol, AE is still a VAT category, not a different tax type.
+        // The difference is carried by TaxCategoryCode = AE plus a zero tax amount and a
+        // reverse-charge reason. See BR-AE-09 and BR-AE-10:
+        // https://docs.peppol.eu/poac/eu/pint-eu/trn-invoice/rule/BR-AE-09/
+        // https://docs.peppol.eu/poac/eu/pint-eu/trn-invoice/rule/BR-AE-10/
+        tax.TaxTypeCode = TaxCategory.VAT_TYPE;
+        tax.TaxAmount = steuer19 + steuer7;
+        tax.TaxCategoryCode = dominantTaxCategory(invoiceLines);
+        tax.TaxPercentage = TaxCategory.toPercentage(tax.TaxCategoryCode);
+        invoice.Tax = tax;
 
         return invoice;
     }
