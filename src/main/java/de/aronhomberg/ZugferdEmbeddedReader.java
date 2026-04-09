@@ -13,7 +13,6 @@ import java.time.ZoneId;
 import java.util.*;
 
 public final class ZugferdEmbeddedReader {
-
     private ZugferdEmbeddedReader() {}
 
     public static Optional<InvoiceResponse.Invoice> tryParse(String pdfPath) {
@@ -62,7 +61,10 @@ public final class ZugferdEmbeddedReader {
 
                 BigDecimal vat = it.getProduct() != null ? bd(it.getProduct().getVATPercent()) : BigDecimal.ZERO;
                 l.TaxPercentage = vat.doubleValue();
-                l.TaxCategoryCode = taxCategoryFromPercent(vat);
+                String taxCategoryCode = it.getProduct() != null
+                        ? TaxCategory.normalize(it.getProduct().getTaxCategoryCode())
+                        : "";
+                l.TaxCategoryCode = taxCategoryCode.isEmpty() ? TaxCategory.fromPercentage(vat) : taxCategoryCode;
 
                 lines.add(l);
             }
@@ -102,20 +104,12 @@ public final class ZugferdEmbeddedReader {
 
             BigDecimal taxAmount = grandTotal.subtract(taxExclusive).max(BigDecimal.ZERO);
 
-            // Pick "dominant" VAT rate/category (highest basis)
-            BigDecimal dominantRate = BigDecimal.ZERO;
-            BigDecimal dominantBasis = BigDecimal.ZERO;
-            for (var entry : vatBasisByRate.entrySet()) {
-                if (entry.getValue().compareTo(dominantBasis) > 0) {
-                    dominantBasis = entry.getValue();
-                    dominantRate = entry.getKey();
-                }
-            }
+            String dominantCategory = TaxCategory.dominantCategory(lines);
 
             out.Tax = new InvoiceResponse.Invoice.Tax();
-            out.Tax.TaxTypeCode = "VAT";
-            out.Tax.TaxCategoryCode = taxCategoryFromPercent(dominantRate);
-            out.Tax.TaxPercentage = dominantRate.doubleValue();
+            out.Tax.TaxTypeCode = TaxCategory.VAT_TYPE;
+            out.Tax.TaxCategoryCode = dominantCategory;
+            out.Tax.TaxPercentage = TaxCategory.toPercentage(dominantCategory);
             out.Tax.TaxAmount = taxAmount.setScale(2, RoundingMode.HALF_UP).doubleValue();
 
             return Optional.of(out);
@@ -152,14 +146,6 @@ public final class ZugferdEmbeddedReader {
         String t = s.trim();
         return t.isEmpty() ? fallback : t;
     }
-
-    private static String taxCategoryFromPercent(BigDecimal percent) {
-        BigDecimal p = percent == null ? BigDecimal.ZERO : percent.stripTrailingZeros();
-        if (p.compareTo(BigDecimal.ZERO) == 0) return "G";
-        if (p.compareTo(new BigDecimal("7")) == 0) return "AA";
-        return "S";
-    }
-
     private static <T> T safe(SupplierX<T> s) {
         try { return s.get(); } catch (Exception e) { return null; }
     }
