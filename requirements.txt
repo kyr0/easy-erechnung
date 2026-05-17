@@ -59,7 +59,7 @@ python-dateutil==2.9.0.post0
 pytz==2025.2
 PyYAML==6.0.2
 regex==2025.11.3
-requests==2.32.5
+requests==2.33.0
 ruamel.yaml==0.19.1
 safetensors==0.7.0
 scikit-learn==1.8.0
